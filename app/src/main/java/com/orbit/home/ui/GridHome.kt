@@ -556,7 +556,12 @@ fun GridHome(
         // The cell that could become, or fill, a folder: an app over another app, or over a folder with
         // room. A folder is never carried into anything - they do not nest.
         val occupant = hovering?.let { cells.getOrNull(it) }.orEmpty()
+        // The cell whose apps have already slid out of the way for the carried one. Like Launcher3, once
+        // a reorder has happened the app under the finger is no longer really there, so that cell can no
+        // longer become a folder until the finger moves on to another cell.
+        var previewTo by remember { mutableStateOf<Int?>(null) }
         val canMerge = carriedNow != null && occupant.isNotEmpty() && occupant != carriedNow &&
+            hovering != previewTo &&
             !GridFolders.isFolderId(carriedNow) &&
             (!GridFolders.isFolderId(occupant) ||
                 folderById[occupant]?.let {
@@ -583,12 +588,11 @@ fun GridHome(
         // passing over four apps on its way somewhere would shove all four aside in turn. Launcher3
         // waits too. Moving to another cell keeps the last preview until the new one has settled, so
         // the grid does not flicker back and forth in between.
-        var previewTo by remember { mutableStateOf<Int?>(null) }
         LaunchedEffect(previewHover) {
             if (previewHover == null) {
                 previewTo = null
             } else {
-                delay(PREVIEW_DWELL_MS)
+                delay(REORDER_DWELL_MS)
                 previewTo = previewHover
             }
         }
@@ -1169,10 +1173,11 @@ private const val DRAG_PAGE_SHRINK = 0.97f
 /**
  * How long a carried app has to rest on a cell before the apps there make room for it.
  *
- * Short enough to feel like it is following the finger, long enough that sweeping across the grid
- * does not make every app it passes jump aside.
+ * Deliberately longer than [FOLDER_DWELL_MS], as Launcher3's reorder timeout is longer than its folder
+ * one: a finger settling onto an app must get the chance to offer a folder BEFORE the app slides away
+ * from under it. If the apps moved first, a folder could never be reached.
  */
-private const val PREVIEW_DWELL_MS = 140L
+private const val REORDER_DWELL_MS = 650L
 
 /**
  * A new folder has no name of its own: it is shown as "Folder" in whatever language the phone is in,
@@ -1183,8 +1188,8 @@ private const val NEW_FOLDER_NAME = ""
 /**
  * How long a carried app has to rest over the middle of another before dropping it makes a folder.
  *
- * Longer than [PREVIEW_DWELL_MS] on purpose: moving apart to make room is cheap and takes back
- * easily, but a folder is a bigger thing to offer, and it should only appear when it was meant.
+ * Shorter than [REORDER_DWELL_MS] on purpose: the folder offer has to appear while the other app is
+ * still under the finger, before the reorder preview slides it away.
  */
 private const val FOLDER_DWELL_MS = 350L
 
