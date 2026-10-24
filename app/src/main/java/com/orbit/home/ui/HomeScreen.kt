@@ -774,6 +774,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     onLaunch = viewModel::launch,
                     externalDrag = appDrag,
                     onExternalDragDone = { appDrag = null },
+                    reducedMotion = state.reducedMotion,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()

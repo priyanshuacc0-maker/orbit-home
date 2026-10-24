@@ -131,6 +131,23 @@ object GridOrder {
     }
 
     /**
+     * Which apps change cell between [before] and [after], and the cell each one ends up in.
+     *
+     * This is what the grid draws while an app is carried: [after] is what dropping it right now
+     * would produce, so every app listed here is one that has to get out of the way. [mover] is the
+     * app being carried and is left out - it is under the finger, not sliding.
+     */
+    fun moves(before: List<String>, after: List<String>, mover: String): Map<String, Int> {
+        val was = HashMap<String, Int>(before.size)
+        before.forEachIndexed { index, id -> if (id != EMPTY) was.putIfAbsent(id, index) }
+        val out = HashMap<String, Int>()
+        after.forEachIndexed { index, id ->
+            if (id != EMPTY && id != mover && was[id] != index) out[id] = index
+        }
+        return out
+    }
+
+    /**
      * The free cell on [page] nearest [to], or null if that page has none.
      *
      * Outward from [to] on both sides, so an app lands as close as possible to where the finger let go

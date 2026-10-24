@@ -1,5 +1,10 @@
 package com.orbit.home.ui
 
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +29,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,6 +100,8 @@ fun GridHome(
      */
     externalDrag: ExternalAppDrag? = null,
     onExternalDragDone: () -> Unit = {},
+    /** With motion off, apps still get out of the way - they just arrive in one frame. */
+    reducedMotion: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Alphabetical, using the locale-aware collator so accents and non-Latin scripts order the way a
@@ -422,6 +430,51 @@ fun GridHome(
             onExternalDragDone()
         }
 
+        // ---- Getting out of the way ---------------------------------------------------------------
+        // The cell a carried app is over, or null if it is over none, or over a drop target at the top.
+        // Held and drawer-carried apps are treated the same: both are about to be dropped on a cell.
+        val hoverHeld = held
+        val hovering: Int? = when {
+            hoverHeld != null ->
+                if (targetAt(hoverHeld.x, hoverHeld.y) != null) null
+                else cellAt(pager.currentPage, hoverHeld.x, hoverHeld.y)
+            ext != null -> cellAt(pager.currentPage, ext.x - origin.x, ext.y - origin.y)
+            else -> null
+        }
+        // The hover only counts once it has stayed on one cell for a moment. Without that, a finger
+        // passing over four apps on its way somewhere would shove all four aside in turn. Launcher3
+        // waits too. Moving to another cell keeps the last preview until the new one has settled, so
+        // the grid does not flicker back and forth in between.
+        var previewTo by remember { mutableStateOf<Int?>(null) }
+        LaunchedEffect(hovering) {
+            if (hovering == null) {
+                previewTo = null
+            } else {
+                delay(PREVIEW_DWELL_MS)
+                previewTo = hovering
+            }
+        }
+        // Which apps would move if the carried one were dropped now, and into which cell. It is the
+        // drop's own rule ([GridOrder.place] / [GridOrder.insert]), not a second one, so what slides
+        // away is exactly what will be there when the finger lifts.
+        val carriedId = held?.id ?: ext?.id
+        val carriedFrom = held?.from
+        val moves: Map<String, Int> = remember(
+            cells, carriedId, carriedFrom, previewTo, pager.currentPage, perPage
+        ) {
+            val to = previewTo
+            val id = carriedId
+            val first = firstCellOn(pager.currentPage)
+            val range = first..(first + perPage - 1)
+            if (to == null || id == null || to !in range) {
+                emptyMap()
+            } else if (carriedFrom != null) {
+                GridOrder.moves(cells, GridOrder.place(cells, carriedFrom, to, range), id)
+            } else {
+                GridOrder.moves(cells, GridOrder.insert(cells, id, to, range), id)
+            }
+        }
+
         Column(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
@@ -620,11 +673,32 @@ fun GridHome(
                                         // app being carried leaves its cell empty, so the place it
                                         // came from is visibly free while it is in the air.
                                         if (app != null && held?.id != app.id) {
-                                            AppCell(
-                                                app = app,
-                                                iconLoader = iconLoader,
-                                                onLaunch = { onLaunch(app) }
-                                            )
+                                            // Keyed on the app so that when a drop rearranges the cells,
+                                            // each app starts at rest in its new cell instead of carrying
+                                            // the old cell's slide with it.
+                                            key(app.id) {
+                                                // Where this app is being pushed to, in cells from where it
+                                                // sits. Only ever within this page; an app is never slid
+                                                // off the edge of the page the user is looking at.
+                                                val slot = moves[app.id]
+                                                    ?.minus(firstCellOn(page))
+                                                    ?.takeIf { it in 0 until perPage }
+                                                ShiftAway(
+                                                    dx = if (slot != null) {
+                                                        ((slot % GRID_COLUMNS) - column) * cellWidthPx
+                                                    } else 0f,
+                                                    dy = if (slot != null) {
+                                                        ((slot / GRID_COLUMNS) - row) * cellHeightPx
+                                                    } else 0f,
+                                                    reducedMotion = reducedMotion
+                                                ) {
+                                                    AppCell(
+                                                        app = app,
+                                                        iconLoader = iconLoader,
+                                                        onLaunch = { onLaunch(app) }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -793,6 +867,38 @@ fun GridHome(
 }
 
 /**
+ * [content], slid by ([dx], [dy]) pixels from where its cell is, and eased there.
+ *
+ * It is a draw-time translation and nothing else, so the cell keeps its place in the layout and
+ * nothing is re-measured while apps slide. A spring rather than a fixed-time tween, so a target that
+ * changes mid-slide (the finger moving on to the next cell) redirects the app smoothly instead of
+ * restarting the animation.
+ */
+@Composable
+private fun ShiftAway(
+    dx: Float,
+    dy: Float,
+    reducedMotion: Boolean,
+    content: @Composable () -> Unit
+) {
+    val spec: FiniteAnimationSpec<Float> = if (reducedMotion) {
+        snap()
+    } else {
+        spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+    }
+    val x by animateFloatAsState(dx, spec, label = "shiftX")
+    val y by animateFloatAsState(dy, spec, label = "shiftY")
+    Box(
+        modifier = Modifier.graphicsLayer {
+            translationX = x
+            translationY = y
+        }
+    ) {
+        content()
+    }
+}
+
+/**
  * An app being carried in from the drawer: which one, where the finger is (root coordinates), and
  * whether it has been let go.
  */
@@ -823,6 +929,14 @@ private const val GRID_COLUMNS = 4
  * than one that does not move at all.
  */
 private const val DRAG_PAGE_SHRINK = 0.97f
+
+/**
+ * How long a carried app has to rest on a cell before the apps there make room for it.
+ *
+ * Short enough to feel like it is following the finger, long enough that sweeping across the grid
+ * does not make every app it passes jump aside.
+ */
+private const val PREVIEW_DWELL_MS = 140L
 
 /** How far the finger has to move before a hold becomes a drag, and the menu goes away. */
 private val MENU_MOVE = 8.dp
