@@ -175,6 +175,9 @@ class ShortcutWheelService : Service() {
     /** How much nearer another edge must be than the current one before the bar hops to it. */
     private var hopHysteresisPx = 0f
 
+    /** How much nearer another edge must be than the current one before a carried bar hops to it. */
+    private var carryHysteresisPx = 0f
+
     /**
      * True from the moment the bar hops to another edge until its new windows have taken
      * their new shape. Both the tab and the wheel are drawn invisible meanwhile, so the
@@ -421,6 +424,7 @@ class ShortcutWheelService : Service() {
         handleLengthPx = (HANDLE_TOUCH_LENGTH.value * density).toInt()
         snapZonePx = SNAP_ZONE.value * density
         hopHysteresisPx = HOP_HYSTERESIS.value * density
+        carryHysteresisPx = CARRY_HYSTERESIS.value * density
 
         // Going foreground comes first and is guarded: startForegroundService() promises the
         // system it will happen, and an exception thrown from here is an app crash.
@@ -1348,7 +1352,7 @@ class ShortcutWheelService : Service() {
                         var lastHopFrom: DockEdge? = null
                         // Holding still picks the bar up: from then on it follows the finger
                         // anywhere, onto any edge, with no need to start the drag along the edge.
-                        val pickupAt = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
+                        val pickupAt = down.uptimeMillis + minOf(viewConfiguration.longPressTimeoutMillis.toLong(), PICKUP_MS)
                         while (true) {
                             val event = if (axis == 0) {
                                 val wait = pickupAt - SystemClock.uptimeMillis()
@@ -1418,9 +1422,9 @@ class ShortcutWheelService : Service() {
                                 val fingerY = handleRoot.rawY
                                 // Carried into another edge's zone, the bar hops to it. Anywhere
                                 // else it stays on its edge and just follows the finger along it.
-                                val hopTo = EdgeDockGeometry.edgeForDrag(
-                                    dockEdge, baseArea(), fingerX, fingerY, snapZonePx,
-                                    hopHysteresisPx, lastHopFrom
+                                val hopTo = EdgeDockGeometry.edgeForCarry(
+                                    dockEdge, baseArea(), fingerX, fingerY,
+                                    carryHysteresisPx, lastHopFrom, hopHysteresisPx
                                 )
                                 val hopped = hopTo != dockEdge
                                 if (hopped) {
@@ -1807,6 +1811,12 @@ class ShortcutWheelService : Service() {
          * bar flickered between edges on tiny finger movements.
          */
         private val HOP_HYSTERESIS = 16.dp
+
+        /** A carried bar hops once another edge is this much nearer the finger than its own. */
+        private val CARRY_HYSTERESIS = 20.dp
+
+        /** How long a held-still finger waits before it picks the bar up, at most. */
+        private const val PICKUP_MS = 260L
 
         /** How far you have to pull for the wheel to come fully out. */
         private val PULL_DISTANCE = 80.dp

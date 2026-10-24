@@ -337,6 +337,38 @@ object EdgeDockGeometry {
     }
 
     /**
+     * The edge a bar being carried should be on: simply the one nearest the finger.
+     *
+     * Another edge wins as soon as it is nearer than [current] by more than [hysteresisPx], plus
+     * [stickyExtraPx] for [stickyEdge] (the edge the bar just left), so crossing the middle of the
+     * screen or a diagonal never makes it flicker, but there is no zone to find and no need to push
+     * the finger all the way to the far edge: past the halfway line is enough.
+     */
+    fun edgeForCarry(
+        current: DockEdge,
+        area: Rect,
+        x: Float,
+        y: Float,
+        hysteresisPx: Float,
+        stickyEdge: DockEdge? = null,
+        stickyExtraPx: Float = 0f
+    ): DockEdge {
+        val here = distanceToEdge(current, area, x, y)
+        var best = current
+        var bestDistance = Float.MAX_VALUE
+        for (edge in DockEdge.entries) {
+            if (edge == current) continue
+            val d = distanceToEdge(edge, area, x, y)
+            val margin = hysteresisPx + if (edge == stickyEdge) stickyExtraPx else 0f
+            if (d + margin < here && d < bestDistance) {
+                best = edge
+                bestDistance = d
+            }
+        }
+        return best
+    }
+
+    /**
      * One step of a fixed-fraction chase from [current] towards [target].
      *
      * The wheel's reveal is drawn by chasing the finger rather than jumping to it, which is what
