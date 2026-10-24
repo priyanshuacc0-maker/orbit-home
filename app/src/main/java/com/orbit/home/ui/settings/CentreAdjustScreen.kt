@@ -218,9 +218,11 @@ fun CentreAdjustScreen(
                         )
                         scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
                     }) {
+                        // The full-image drawImage overload: its dstOffset defaults to the origin,
+                        // and it is the only one that takes a filter quality, so there is no
+                        // topLeft here - that parameter belongs to the other overload.
                         drawImage(
                             image = working,
-                            topLeft = Offset.Zero,
                             filterQuality = FilterQuality.Medium
                         )
                     }
