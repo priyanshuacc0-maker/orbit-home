@@ -109,15 +109,42 @@ object EdgeDockGeometry {
      * fraction. 0 puts the wheel against one end of the edge, 1 against the other;
      * the wheel stays wholly inside the area at both.
      */
-    fun centreAlong(edge: DockEdge, area: Rect, wheelSizePx: Int, dockedFraction: Float): Float {
-        val travel = (alongLength(edge, area) - wheelSizePx).coerceAtLeast(0)
-        return alongStart(edge, area) + wheelSizePx / 2f + travel * dockedFraction.coerceIn(0f, 1f)
+    fun centreAlong(
+        edge: DockEdge, area: Rect, wheelSizePx: Int, dockedFraction: Float,
+        reachPx: Int = wheelSizePx
+    ): Float {
+        val travel = (alongLength(edge, area) - reachPx).coerceAtLeast(0)
+        return alongStart(edge, area) + reachPx / 2f + travel * dockedFraction.coerceIn(0f, 1f)
     }
 
     /** The docked fraction for a wheel centred at [centre], the inverse of [centreAlong]. */
-    fun fractionForCentreAlong(centre: Float, edge: DockEdge, area: Rect, wheelSizePx: Int): Float {
-        val travel = (alongLength(edge, area) - wheelSizePx).coerceAtLeast(1)
-        return ((centre - alongStart(edge, area) - wheelSizePx / 2f) / travel).coerceIn(0f, 1f)
+    fun fractionForCentreAlong(
+        centre: Float, edge: DockEdge, area: Rect, wheelSizePx: Int,
+        reachPx: Int = wheelSizePx
+    ): Float {
+        val travel = (alongLength(edge, area) - reachPx).coerceAtLeast(1)
+        return ((centre - alongStart(edge, area) - reachPx / 2f) / travel).coerceIn(0f, 1f)
+    }
+
+    /** Whether [centre] (along [edge]) is past the start / end of the edge: round the corner. */
+    fun pastEnd(edge: DockEdge, area: Rect, centre: Float): Int {
+        val start = alongStart(edge, area)
+        return when {
+            centre < start -> -1
+            centre > start + alongLength(edge, area) -> 1
+            else -> 0
+        }
+    }
+
+    /** Where the bar lands when it rolls off one end of an edge: the next edge, at its matching end. */
+    data class CornerHop(val edge: DockEdge, val fraction: Float)
+
+    /** [towardEnd] false = off the start (top / left) of [edge], true = off its end (bottom / right). */
+    fun cornerHop(edge: DockEdge, towardEnd: Boolean): CornerHop = when (edge) {
+        DockEdge.RIGHT -> if (towardEnd) CornerHop(DockEdge.BOTTOM, 1f) else CornerHop(DockEdge.TOP, 1f)
+        DockEdge.LEFT -> if (towardEnd) CornerHop(DockEdge.BOTTOM, 0f) else CornerHop(DockEdge.TOP, 0f)
+        DockEdge.TOP -> if (towardEnd) CornerHop(DockEdge.RIGHT, 0f) else CornerHop(DockEdge.LEFT, 0f)
+        DockEdge.BOTTOM -> if (towardEnd) CornerHop(DockEdge.RIGHT, 1f) else CornerHop(DockEdge.LEFT, 1f)
     }
 
     /** The wheel's centre vertically, from the docked fraction. */
@@ -143,10 +170,15 @@ object EdgeDockGeometry {
         edge: DockEdge,
         area: Rect,
         wheelSizePx: Int,
-        dockedFraction: Float
+        dockedFraction: Float,
+        reachPx: Int = wheelSizePx
     ): Rect {
         val half = halfWheelPx(wheelSizePx)
-        val along = (centreAlong(edge, area, wheelSizePx, dockedFraction) - wheelSizePx / 2f).roundToInt()
+        // The handle may reach the corners; the wheel is held wholly inside the area.
+        val lo = alongStart(edge, area) + wheelSizePx / 2f
+        val hi = maxOf(lo, alongStart(edge, area) + alongLength(edge, area) - wheelSizePx / 2f)
+        val centre = centreAlong(edge, area, wheelSizePx, dockedFraction, reachPx).coerceIn(lo, hi)
+        val along = (centre - wheelSizePx / 2f).roundToInt()
         return when (edge) {
             DockEdge.RIGHT -> Rect(area.right - half, along, half, wheelSizePx)
             DockEdge.LEFT -> Rect(area.x, along, half, wheelSizePx)
@@ -168,9 +200,10 @@ object EdgeDockGeometry {
         wheelSizePx: Int,
         handleThicknessPx: Int,
         handleLengthPx: Int,
-        dockedFraction: Float
+        dockedFraction: Float,
+        reachPx: Int = wheelSizePx
     ): Rect {
-        val centre = centreAlong(edge, area, wheelSizePx, dockedFraction)
+        val centre = centreAlong(edge, area, wheelSizePx, dockedFraction, reachPx)
         val along = (centre - handleLengthPx / 2f).roundToInt()
         return when (edge) {
             DockEdge.RIGHT -> Rect(area.right - handleThicknessPx, along, handleThicknessPx, handleLengthPx)

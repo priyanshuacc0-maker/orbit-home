@@ -954,7 +954,7 @@ class ShortcutWheelService : Service() {
             // The lowest the wheel's centre may sit with the keyboard up.
             val lowestCentre = screen.height() - keyboardLiftPx - keyboardGapPx() - wheelSizePx / 2f
             val lifted = EdgeDockGeometry.fractionForCentreAlong(
-                lowestCentre, dockEdge, baseArea(), wheelSizePx
+                lowestCentre, dockEdge, baseArea(), wheelSizePx, handleLengthPx
             )
             return minOf(offsetFraction, lifted)
         }
@@ -979,14 +979,14 @@ class ShortcutWheelService : Service() {
             setBounds(
                 wheelRoot,
                 wheelParams,
-                EdgeDockGeometry.wheelWindow(edge, area, wheelSizePx, fraction)
+                EdgeDockGeometry.wheelWindow(edge, area, wheelSizePx, fraction, handleLengthPx)
             )
         }
         setBounds(
             handleRoot,
             handleParams,
             EdgeDockGeometry.handleWindow(
-                edge, area, wheelSizePx, handleThicknessPx, handleLengthPx, fraction
+                edge, area, wheelSizePx, handleThicknessPx, handleLengthPx, fraction, handleLengthPx
             )
         )
         updateGestureExclusion()
@@ -1284,7 +1284,7 @@ class ShortcutWheelService : Service() {
                         // to centre itself under it. Zero once the bar hops to another edge:
                         // that offset was measured along the old edge's axis.
                         var grabOffset = EdgeDockGeometry.centreAlong(
-                            startEdge, dockArea(), wheelSizePx, startOffset
+                            startEdge, dockArea(), wheelSizePx, startOffset, handleLengthPx
                         ) - (if (startEdge.isSide) startY else startX)
                         val slop = viewConfiguration.touchSlop
                         // 0 undecided, 1 pull (towards or away from the screen's inside),
@@ -1381,16 +1381,33 @@ class ShortcutWheelService : Service() {
                                 // into a fraction of the whole travel: 0 is one end of the edge
                                 // and 1 the other. The travel already leaves out the wheel's own
                                 // size, so the bar stays wholly inside the usable area at both ends.
-                                val centre = (if (dockEdge.isSide) fingerY else fingerX) + grabOffset
+                                var centre = (if (dockEdge.isSide) fingerY else fingerX) + grabOffset
+                                // Slid past the end of the edge: roll round the corner onto the
+                                // next edge, carrying on from the matching end of it.
+                                var rolled = false
+                                val past = EdgeDockGeometry.pastEnd(dockEdge, dockArea(), centre)
+                                if (!hopped && past != 0) {
+                                    val next = EdgeDockGeometry.cornerHop(dockEdge, past > 0)
+                                    lastHopFrom = dockEdge
+                                    beginHop(next.edge)
+                                    haptics.tap()
+                                    offsetFraction = next.fraction
+                                    val landed = EdgeDockGeometry.centreAlong(
+                                        dockEdge, dockArea(), wheelSizePx, next.fraction, handleLengthPx
+                                    )
+                                    grabOffset = landed - (if (dockEdge.isSide) fingerY else fingerX)
+                                    centre = landed
+                                    rolled = true
+                                }
                                 offsetFraction = EdgeDockGeometry.fractionForCentreAlong(
-                                    centre, dockEdge, dockArea(), wheelSizePx
+                                    centre, dockEdge, dockArea(), wheelSizePx, handleLengthPx
                                 ).coerceIn(
                                     HomeSettings.SHORTCUT_OFFSET_MIN,
                                     HomeSettings.SHORTCUT_OFFSET_MAX
                                 )
                                 // A hop reshapes both windows now, with the position already
                                 // right for the new edge; a plain slide is coalesced.
-                                if (hopped) applyFrames() else requestPosition()
+                                if (hopped || rolled) applyFrames() else requestPosition()
                             }
                         }
                         dragging = false
