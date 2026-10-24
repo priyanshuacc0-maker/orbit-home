@@ -1002,6 +1002,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     // The finger is off it now, so the spring is in charge again.
                     onDrawerRelease = { open, velocityY -> releaseDrawer(open, velocityY) },
                     pullDistancePx = drawerTravelPx,
+                    onReorder = viewModel::saveDockOrder,
+                    onRemove = { app ->
+                        viewModel.saveDockOrder(state.dockApps.map { it.id }.filter { it != app.id })
+                    },
                     // Where the dock begins, so the triple tap knows where the wallpaper stops.
                     modifier = Modifier.onGloballyPositioned {
                         dockTopPx = it.positionInRoot().y

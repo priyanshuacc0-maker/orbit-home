@@ -27,7 +27,9 @@ internal class AppDragCallbacks(
     val onEnd: (Offset) -> Unit,
     val onCancel: () -> Unit,
     /** The icon was held and let go without being carried anywhere: show its menu. */
-    val onHold: () -> Unit
+    val onHold: () -> Unit,
+    /** True the moment the icon is picked up, false when the gesture is over, however it ends. */
+    val onPickUp: (Boolean) -> Unit = {}
 )
 
 /**
@@ -41,7 +43,11 @@ internal class AppDragCallbacks(
  * This lives on the icon, which stays composed for the whole drag: the home screen hides the drawer
  * instead of removing it, because removing the node that owns the pointer would cancel the gesture.
  */
-internal fun Modifier.appDragSource(callbacks: AppDragCallbacks?): Modifier {
+internal fun Modifier.appDragSource(
+    callbacks: AppDragCallbacks?,
+    /** Read the held touch before the icon's own tap handler, so a lift can never also launch the app. */
+    early: Boolean = false
+): Modifier {
     if (callbacks == null) return this
     return composed {
         val current by rememberUpdatedState(callbacks)
@@ -56,33 +62,38 @@ internal fun Modifier.appDragSource(callbacks: AppDragCallbacks?): Modifier {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val held = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
                     haptics.press()
+                    current.onPickUp(true)
                     fun rootOf(local: Offset): Offset = coords?.localToRoot(local) ?: local
 
                     var dragging = false
                     var last = held.position
                     val origin = held.position
                     held.consume()
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Main)
-                        val change = event.changes.firstOrNull { it.id == held.id }
-                        if (change == null) {
-                            if (dragging) current.onCancel()
-                            return@awaitEachGesture
-                        }
-                        last = change.position
-                        if (!change.pressed) {
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent(if (early) PointerEventPass.Initial else PointerEventPass.Main)
+                            val change = event.changes.firstOrNull { it.id == held.id }
+                            if (change == null) {
+                                if (dragging) current.onCancel()
+                                return@awaitEachGesture
+                            }
+                            last = change.position
+                            if (!change.pressed) {
+                                change.consume()
+                                if (dragging) current.onEnd(rootOf(last)) else current.onHold()
+                                return@awaitEachGesture
+                            }
+                            if (!dragging && (last - origin).getDistance() > slop) {
+                                dragging = true
+                                current.onStart(rootOf(last))
+                            }
+                            if (dragging) {
+                                current.onMove(rootOf(last))
+                            }
                             change.consume()
-                            if (dragging) current.onEnd(rootOf(last)) else current.onHold()
-                            return@awaitEachGesture
                         }
-                        if (!dragging && (last - origin).getDistance() > slop) {
-                            dragging = true
-                            current.onStart(rootOf(last))
-                        }
-                        if (dragging) {
-                            current.onMove(rootOf(last))
-                        }
-                        change.consume()
+                    } finally {
+                        current.onPickUp(false)
                     }
                 }
             }

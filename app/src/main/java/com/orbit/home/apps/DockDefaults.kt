@@ -73,4 +73,11 @@ object DockDefaults {
     }
 
     const val MAX_DOCK = 5
+
+    /** How many apps a brand-new dock starts with. */
+    const val SEED_COUNT = 4
+
+    /** [chosen] first, then [candidates] to make up the numbers, [count] apps at most and no repeats. */
+    fun fillTo(chosen: List<String>, candidates: List<String>, count: Int = SEED_COUNT): List<String> =
+        (chosen + candidates).distinct().take(count)
 }

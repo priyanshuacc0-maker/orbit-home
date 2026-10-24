@@ -539,10 +539,12 @@ private fun AppRow(
  * [onAddToHome] is null for an app that is already on the home screen, so it is not offered twice.
  */
 @Composable
-private fun DrawerAppMenu(
+internal fun DrawerAppMenu(
     app: InstalledApp,
     onDismiss: () -> Unit,
-    onAddToHome: (() -> Unit)?
+    onAddToHome: (() -> Unit)?,
+    /** Offered where the app can be taken off the place it is in (the dock). */
+    onRemove: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -587,7 +589,7 @@ private fun DrawerAppMenu(
                 onDismiss()
                 AppActions.openAppInfo(context, app.packageName)
             },
-            onRemove = null,
+            onRemove = onRemove?.let { remove -> { onDismiss(); remove() } },
             onUninstall = {
                 onDismiss()
                 AppActions.uninstall(context, app.packageName)

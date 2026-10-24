@@ -398,8 +398,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private suspend fun seedDockIfNeeded(apps: List<InstalledApp>) {
         if (settings.dockInitialized || apps.isEmpty()) return
-        val seeded = DockDefaults.resolve(getApplication())
-            .filter { id -> apps.any { it.id == id } }
+        val installed = apps.map { it.id }.toSet()
+        val own = getApplication<Application>().packageName
+        // A new dock starts with four apps. The named and system picks go first; if the phone
+        // has fewer of those than that, it is filled up from what is installed.
+        val seeded = DockDefaults.fillTo(
+            chosen = DockDefaults.resolve(getApplication()).filter { it in installed },
+            candidates = apps.filter { it.packageName != own }.map { it.id }
+        )
         // One edit that decides against what is actually stored. The in-memory copy of the settings
         // is still the default until the first emission arrives, so it cannot be trusted here.
         preferences.seedDockIfNeeded(seeded)
@@ -880,6 +886,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setEditingDock(editing: Boolean) {
         _state.update { it.copy(editingDock = editing) }
+    }
+
+    /** Saves the dock's order (or a dock with an app taken off it) without closing anything. */
+    fun saveDockOrder(ids: List<String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            preferences.setDockApps(ids.take(HomeSettings.DOCK_MAX))
+        }
     }
 
     /** Saves the dock, capped at [HomeSettings.DOCK_MAX] so the row cannot overflow. */

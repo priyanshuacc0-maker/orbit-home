@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,6 +29,13 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.abs
+import kotlin.math.roundToInt
+import androidx.compose.runtime.key
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.zIndex
 
 /** The dock's icon size. Fixed: there is no appearance setting any more. */
 private val DOCK_ICON_SIZE = 52.dp
@@ -83,6 +91,10 @@ fun DockRow(
      * to be most of the screen's height and not a few dp.
      */
     pullDistancePx: Float = 0f,
+    /** The dock's apps in their new order, once an icon has been dragged to a new place. */
+    onReorder: (List<String>) -> Unit = {},
+    /** Take an app off the dock (not off the phone). */
+    onRemove: (InstalledApp) -> Unit = {},
 ) {
     val density = LocalDensity.current
     val px = with(density) { DOCK_ICON_SIZE.roundToPx() }
@@ -92,6 +104,17 @@ fun DockRow(
     // Guards against opening twice from one pull, and re-arms itself in case the
     // gesture is cancelled by the drawer appearing over the finger.
     var armed by remember { mutableStateOf(true) }
+
+    // Hold an icon for its menu, or carry it along the dock to put it somewhere else.
+    var order by remember(apps) { mutableStateOf(apps.map { it.id }) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
+    var dragId by remember { mutableStateOf<String?>(null) }
+    var dragPos by remember { mutableStateOf(Offset.Zero) }
+    // While an icon is picked up the dock's own pull-up must not take the finger away from it.
+    var carrying by remember { mutableStateOf(false) }
+    var rowLeft by remember { mutableFloatStateOf(0f) }
+    var rowWidth by remember { mutableFloatStateOf(0f) }
+    val slotCentres = remember { HashMap<String, Offset>() }
 
     LaunchedEffect(armed) {
         if (!armed) {
@@ -139,7 +162,7 @@ fun DockRow(
                                 // a slightly diagonal swipe still counts as upward.
                                 if (abs(dy) > slop * 0.5f || abs(dx) > slop * 0.5f) {
                                     decided = true
-                                    upward = dy < 0f && abs(dy) * 1.4f > abs(dx)
+                                    upward = !carrying && dy < 0f && abs(dy) * 1.4f > abs(dx)
                                 }
                             }
                             if (!decided || !upward) continue
@@ -178,25 +201,95 @@ fun DockRow(
                 .fillMaxWidth()
                 // No pill behind the icons: the dock sits on the wallpaper like everything else, and a
                 // translucent slab under it reads as a shadow the dock does not cast.
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+                .onGloballyPositioned {
+                    rowLeft = it.positionInRoot().x
+                    rowWidth = it.size.width.toFloat()
+                },
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            for (app in apps) {
-                val icon = rememberAppIcon(app.id, px, iconLoader)
-                AppIcon(
-                    label = app.label,
-                    icon = icon,
-                    size = DOCK_ICON_SIZE,
-                    // A plain tap, with no double-tap hook anywhere. Waiting to see
-                    // whether a second tap was coming is what used to make every tap
-                    // feel slow, and there is nothing to offer on a second tap now.
-                    // for a possible second tap before firing onClick, which is what
-                    // made every single dock tap land a beat late. The dock's editor is
-                    // offered by two taps on two different apps instead, tracked by the
-                    // caller, so a tap opens its app immediately.
-                    onClick = { onLaunch(app) }
-                )
+            val byId = apps.associateBy { it.id }
+            for (id in order) {
+                val app = byId[id] ?: continue
+                key(id) {
+                    val icon = rememberAppIcon(app.id, px, iconLoader)
+                    val callbacks = remember(id, apps) {
+                        AppDragCallbacks(
+                            onStart = { at ->
+                                dragId = id
+                                dragPos = at
+                                menuFor = null
+                            },
+                            onMove = { at ->
+                                dragPos = at
+                                // Which slot the finger is over, from where the evenly spaced slots are.
+                                val n = order.size
+                                if (n > 1 && rowWidth > 0f) {
+                                    val w = px.toFloat()
+                                    val gap = (rowWidth - n * w) / (n + 1)
+                                    val target = ((at.x - rowLeft - gap - w / 2f) / (gap + w))
+                                        .roundToInt().coerceIn(0, n - 1)
+                                    val from = order.indexOf(id)
+                                    if (from >= 0 && target != from) {
+                                        order = order.toMutableList().apply {
+                                            removeAt(from)
+                                            add(target, id)
+                                        }
+                                        haptics.tap()
+                                    }
+                                }
+                            },
+                            onEnd = {
+                                dragId = null
+                                if (order != apps.map { it.id }) onReorder(order)
+                            },
+                            onCancel = {
+                                dragId = null
+                                order = apps.map { it.id }
+                            },
+                            onHold = { menuFor = id },
+                            onPickUp = { up -> carrying = up }
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .onGloballyPositioned { c ->
+                                val p = c.positionInRoot()
+                                slotCentres[id] = Offset(p.x + c.size.width / 2f, p.y + c.size.height / 2f)
+                            }
+                            .appDragSource(callbacks, early = true)
+                            .zIndex(if (dragId == id) 1f else 0f)
+                            .graphicsLayer {
+                                if (dragId == id) {
+                                    val c = slotCentres[id]
+                                    if (c != null) {
+                                        translationX = dragPos.x - c.x
+                                        translationY = dragPos.y - c.y
+                                    }
+                                    scaleX = 1.15f
+                                    scaleY = 1.15f
+                                    alpha = 0.92f
+                                }
+                            }
+                    ) {
+                        AppIcon(
+                            label = app.label,
+                            icon = icon,
+                            size = DOCK_ICON_SIZE,
+                            // A plain tap, with no double-tap hook anywhere: a tap opens its app at once.
+                            onClick = { onLaunch(app) }
+                        )
+                        if (menuFor == id) {
+                            DrawerAppMenu(
+                                app = app,
+                                onDismiss = { menuFor = null },
+                                onAddToHome = null,
+                                onRemove = { onRemove(app) }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
