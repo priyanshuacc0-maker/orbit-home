@@ -99,6 +99,8 @@ data class HomeSettings(
      */
     val hiddenWallpaperShowing: Boolean = false,
     val clockColour: Int = 3,
+    /** Whether the calculator is in its dark theme. Dark unless the user has switched it. */
+    val calcDark: Boolean = true,
     val clockX: Float = 0.5f,
     val clockY: Float = 0.06f,
     val clockTextScale: Float = 1f,
@@ -283,6 +285,9 @@ class AppPreferences(private val context: Context) {
     /** Which of the clock bar's colours is chosen, by position in the palette. */
     val CLOCK_COLOUR = intPreferencesKey("clock_colour")
 
+    /** The calculator's theme: true for dark, which is also what it is until the switch is used. */
+    val CALC_DARK = booleanPreferencesKey("calc_dark")
+
     // Where the time bar sits, as a share of the screen so it holds on any size of phone, and how big
     // and how long it is. All four are set by dragging and resizing the bar on the home screen.
     val CLOCK_X = floatPreferencesKey("clock_x")
@@ -339,6 +344,7 @@ class AppPreferences(private val context: Context) {
             hapticsEnabled = p[Keys.HAPTICS_ENABLED] ?: true,
             hiddenWallpaperShowing = p[Keys.HIDDEN_WALLPAPER_SHOWING] ?: false,
             clockColour = p[Keys.CLOCK_COLOUR] ?: 3,
+            calcDark = p[Keys.CALC_DARK] ?: true,
             clockX = p[Keys.CLOCK_X] ?: 0.5f,
             clockY = p[Keys.CLOCK_Y] ?: 0.06f,
             clockTextScale = p[Keys.CLOCK_TEXT_SCALE] ?: 1f,
@@ -632,6 +638,11 @@ class AppPreferences(private val context: Context) {
     /** The clock bar's background, by position in the palette. */
     suspend fun setClockColour(index: Int) {
         context.dataStore.edit { it[Keys.CLOCK_COLOUR] = index }
+    }
+
+    /** The calculator's theme, kept so it opens the way it was left. */
+    suspend fun setCalcDark(dark: Boolean) {
+        context.dataStore.edit { it[Keys.CALC_DARK] = dark }
     }
 
     /** Where the time bar sits on the home screen, and how big and how long it is. */

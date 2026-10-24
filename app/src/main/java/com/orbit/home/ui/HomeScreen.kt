@@ -720,7 +720,9 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 Spacer(Modifier.weight(1f))
                 ClockPill(
                     colourIndex = state.clockColour,
-                    onPickColour = viewModel::setClockColour
+                    onPickColour = viewModel::setClockColour,
+                    calcDark = state.calcDark,
+                    onCalcDark = viewModel::setCalcDark
                 )
                 Spacer(Modifier.weight(1f))
                 Box {
@@ -1491,7 +1493,13 @@ private fun CentreVideoView(player: ExoPlayer, transform: CentreTransform, modif
  * rather than a fixed second, so it cannot drift behind the clock it is showing.
  */
 @Composable
-private fun ClockPill(colourIndex: Int, onPickColour: (Int) -> Unit, modifier: Modifier = Modifier) {
+private fun ClockPill(
+    colourIndex: Int,
+    onPickColour: (Int) -> Unit,
+    calcDark: Boolean,
+    onCalcDark: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
     var choosing by remember { mutableStateOf(false) }
     var calculating by remember { mutableStateOf(false) }
@@ -1542,7 +1550,11 @@ private fun ClockPill(colourIndex: Int, onPickColour: (Int) -> Unit, modifier: M
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (calculating) {
-            CalculatorDialog(onDismiss = { calculating = false })
+            CalculatorDialog(
+                dark = calcDark,
+                onDarkChange = onCalcDark,
+                onDismiss = { calculating = false }
+            )
         }
         if (choosing) {
             ClockColourChooser(

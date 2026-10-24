@@ -1,5 +1,13 @@
 package com.orbit.home.ui
 
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -66,16 +74,53 @@ import androidx.compose.ui.window.DialogWindowProvider
 import com.orbit.home.R
 import kotlinx.coroutines.launch
 
-private val CardColour = Color(0xFFEAE9FC)
-private val PanelColour = Color(0xFFE5E4F9)
-private val KeyColour = Color(0xFFECEBFD)
-private val OpColour = Color(0xFFE1E0F8)
-private val EqualsColour = Color(0xFF524F85)
-private val BackColour = Color(0xFFFFD6D3)
-private val InkStrong = Color(0xFF3F3D6B)
-private val InkSoft = Color(0xFF6D6B9A)
-private val InkFaint = Color(0xFF8E8CB0)
-private val KeyShadow = Color(0xFFB4B2DE)
+/** Every colour the calculator draws with, so a theme is one value and switching is a blend between two. */
+private class CalcPalette(
+    val card: Color, val cardBorder: Color,
+    val panel: Color, val panelBorder: Color,
+    val digit: Color, val op: Color, val equalsKey: Color, val equalsInk: Color, val back: Color,
+    val inkDigit: Color, val inkOp: Color, val result: Color, val inkSoft: Color, val inkFaint: Color,
+    val keyShadow: Color, val keyBorder: Color,
+    val switchTrack: Color, val switchBorder: Color, val switchThumb: Color,
+    val switchActive: Color, val switchInactive: Color
+)
+
+private val LightPalette = CalcPalette(
+    card = Color(0xFFEAE9FC), cardBorder = Color(0x99FFFFFF),
+    panel = Color(0xFFE5E4F9), panelBorder = Color(0x8CFFFFFF),
+    digit = Color(0xFFECEBFD), op = Color(0xFFE1E0F8), equalsKey = Color(0xFF524F85),
+    equalsInk = Color.White, back = Color(0xFFFFD6D3),
+    inkDigit = Color(0xFF6D6B9A), inkOp = Color(0xFF3F3D6B), result = Color(0xFF3F3D6B),
+    inkSoft = Color(0xFF6D6B9A), inkFaint = Color(0xFF8E8CB0),
+    keyShadow = Color(0xFFB4B2DE), keyBorder = Color(0x00FFFFFF),
+    switchTrack = Color(0xFFE1E0F8), switchBorder = Color(0xFFCFCDEE), switchThumb = Color.White,
+    switchActive = Color(0xFF524F85), switchInactive = Color(0xFFA9A7CE)
+)
+
+private val DarkPalette = CalcPalette(
+    card = Color(0xFF171828), cardBorder = Color(0xFF33344F),
+    panel = Color(0xFF0F1019), panelBorder = Color(0xFF383A57),
+    digit = Color(0xFF272839), op = Color(0xFF262738), equalsKey = Color(0xFF6C5CD1),
+    equalsInk = Color.White, back = Color(0xFF5B2A38),
+    inkDigit = Color(0xFFD8D3FF), inkOp = Color(0xFFE9E6FF), result = Color(0xFFB7A9FF),
+    inkSoft = Color(0xFF9C94E0), inkFaint = Color(0xFF7D7BA6),
+    keyShadow = Color(0x99000000), keyBorder = Color(0x14FFFFFF),
+    switchTrack = Color(0xFF22233A), switchBorder = Color(0xFF3D3E5E), switchThumb = Color(0xFF3A3B5A),
+    switchActive = Color(0xFFA99BFF), switchInactive = Color(0xFF6E6C96)
+)
+
+private fun lerpPalette(a: CalcPalette, b: CalcPalette, t: Float) = CalcPalette(
+    lerp(a.card, b.card, t), lerp(a.cardBorder, b.cardBorder, t),
+    lerp(a.panel, b.panel, t), lerp(a.panelBorder, b.panelBorder, t),
+    lerp(a.digit, b.digit, t), lerp(a.op, b.op, t), lerp(a.equalsKey, b.equalsKey, t),
+    lerp(a.equalsInk, b.equalsInk, t), lerp(a.back, b.back, t),
+    lerp(a.inkDigit, b.inkDigit, t), lerp(a.inkOp, b.inkOp, t), lerp(a.result, b.result, t),
+    lerp(a.inkSoft, b.inkSoft, t), lerp(a.inkFaint, b.inkFaint, t),
+    lerp(a.keyShadow, b.keyShadow, t), lerp(a.keyBorder, b.keyBorder, t),
+    lerp(a.switchTrack, b.switchTrack, t), lerp(a.switchBorder, b.switchBorder, t),
+    lerp(a.switchThumb, b.switchThumb, t), lerp(a.switchActive, b.switchActive, t),
+    lerp(a.switchInactive, b.switchInactive, t)
+)
 
 private val KEY_HEIGHT = 56.dp
 private val KEY_GAP = 8.dp
@@ -88,7 +133,17 @@ private val KEY_GAP = 8.dp
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun CalculatorDialog(onDismiss: () -> Unit) {
+internal fun CalculatorDialog(
+    /** The saved theme: true for dark. */
+    dark: Boolean,
+    onDarkChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    // Held here as well as saved, so the switch answers at once instead of after the save comes back.
+    var isDark by remember { mutableStateOf(dark) }
+    LaunchedEffect(dark) { isDark = dark }
+    val blend by animateFloatAsState(if (isDark) 1f else 0f, tween(320), label = "calcTheme")
+    val pal = lerpPalette(LightPalette, DarkPalette, blend)
     var state by remember { mutableStateOf(CalcState()) }
     var closing by remember { mutableStateOf(false) }
     val progress = rememberPopProgress()
@@ -137,22 +192,32 @@ internal fun CalculatorDialog(onDismiss: () -> Unit) {
                         rise = 28.dp
                     )
                     .clip(shape)
-                    .background(CardColour)
-                    .border(1.dp, Color.White.copy(alpha = 0.6f), shape)
+                    .background(pal.card)
+                    .border(1.dp, pal.cardBorder, shape)
                     // Taps on the card are the card's: they must not fall through and close it.
                     .pointerInput(Unit) { detectTapGestures { } }
                     .padding(22.dp)
             ) {
-                Display(state)
+                ThemeSwitch(
+                    dark = isDark,
+                    pal = pal,
+                    onToggle = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        isDark = !isDark
+                        onDarkChange(isDark)
+                    }
+                )
+                Spacer(Modifier.height(12.dp))
+                Display(state, pal)
                 Spacer(Modifier.height(16.dp))
-                Keypad(onKey = { press(it) }, onClear = { press("C") })
+                Keypad(pal = pal, onKey = { press(it) }, onClear = { press("C") })
             }
         }
     }
 }
 
 @Composable
-private fun Display(state: CalcState) {
+private fun Display(state: CalcState, pal: CalcPalette) {
     val top = Calc.display(state.previous ?: state.expr)
     val result = if (state.expr.isEmpty()) "0" else Calc.preview(state.expr) ?: ""
     val showEquals = state.expr.isNotEmpty() && !state.expr.matches(Regex("[0-9.]+"))
@@ -165,15 +230,15 @@ private fun Display(state: CalcState) {
             .fillMaxWidth()
             .height(100.dp)
             .clip(panel)
-            .background(PanelColour)
-            .border(1.dp, Color.White.copy(alpha = 0.55f), panel)
+            .background(pal.panel)
+            .border(1.dp, pal.panelBorder, panel)
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Box(Modifier.fillMaxWidth().height(26.dp), contentAlignment = Alignment.CenterEnd) {
             Text(
                 text = top,
-                color = InkFaint,
+                color = pal.inkFaint,
                 fontSize = 20.sp,
                 maxLines = 1,
                 softWrap = false,
@@ -182,11 +247,11 @@ private fun Display(state: CalcState) {
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (showEquals) {
-                Text(text = "=", color = InkSoft, fontSize = 32.sp, fontWeight = FontWeight.Medium)
+                Text(text = "=", color = pal.inkSoft, fontSize = 32.sp, fontWeight = FontWeight.Medium)
             }
             Text(
                 text = result,
-                color = InkStrong,
+                color = pal.result,
                 fontSize = when {
                     result.length <= 9 -> 44.sp
                     result.length <= 12 -> 36.sp
@@ -206,13 +271,14 @@ private fun Display(state: CalcState) {
 private enum class KeyKind { DIGIT, OP, FN }
 
 @Composable
-private fun Keypad(onKey: (String) -> Unit, onClear: () -> Unit) {
+private fun Keypad(pal: CalcPalette, onKey: (String) -> Unit, onClear: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val colW = (maxWidth - KEY_GAP * 3) / 4
 
         @Composable
         fun K(key: String, kind: KeyKind, label: String = key, width: Dp = colW) {
             CalcKey(
+                pal = pal,
                 label = label,
                 kind = kind,
                 modifier = Modifier.width(width).height(KEY_HEIGHT),
@@ -228,10 +294,11 @@ private fun Keypad(onKey: (String) -> Unit, onClear: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(KEY_GAP)) {
                 K("%", KeyKind.FN); K("\u00F7", KeyKind.FN); K("\u00D7", KeyKind.FN)
                 CalcKey(
+                    pal = pal,
                     label = null,
                     kind = KeyKind.FN,
                     modifier = Modifier.width(colW).height(KEY_HEIGHT),
-                    container = BackColour,
+                    container = pal.back,
                     description = stringResource(R.string.calc_backspace),
                     onClick = { onKey("\u232B") },
                     onLongClick = onClear
@@ -257,11 +324,12 @@ private fun Keypad(onKey: (String) -> Unit, onClear: () -> Unit) {
                     }
                 }
                 CalcKey(
+                    pal = pal,
                     label = "=",
                     kind = KeyKind.OP,
                     modifier = Modifier.width(colW).height(KEY_HEIGHT * 2 + KEY_GAP),
-                    container = EqualsColour,
-                    ink = Color.White,
+                    container = pal.equalsKey,
+                    ink = pal.equalsInk,
                     description = stringResource(R.string.calc_equals),
                     onClick = { onKey("=") }
                 )
@@ -273,15 +341,16 @@ private fun Keypad(onKey: (String) -> Unit, onClear: () -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CalcKey(
+    pal: CalcPalette,
     label: String?,
     kind: KeyKind,
     modifier: Modifier,
     onClick: () -> Unit,
     container: Color = when (kind) {
-        KeyKind.DIGIT -> KeyColour
-        else -> OpColour
+        KeyKind.DIGIT -> pal.digit
+        else -> pal.op
     },
-    ink: Color = if (kind == KeyKind.DIGIT) InkSoft else InkStrong,
+    ink: Color = if (kind == KeyKind.DIGIT) pal.inkDigit else pal.inkOp,
     description: String? = null,
     onLongClick: (() -> Unit)? = null
 ) {
@@ -292,9 +361,10 @@ private fun CalcKey(
     Box(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .shadow(3.dp, shape, ambientColor = KeyShadow, spotColor = KeyShadow)
+            .shadow(3.dp, shape, ambientColor = pal.keyShadow, spotColor = pal.keyShadow)
             .clip(shape)
             .background(container)
+            .border(1.dp, pal.keyBorder, shape)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
             .combinedClickable(
                 interactionSource = source,
@@ -318,6 +388,64 @@ private fun CalcKey(
                 fontSize = if (kind == KeyKind.DIGIT) 30.sp else 26.sp,
                 fontWeight = if (kind == KeyKind.DIGIT) FontWeight.Normal else FontWeight.Medium
             )
+        }
+    }
+}
+
+/**
+ * The dark/light switch: a moon and a sun on one track, with a thumb that slides under whichever is on.
+ */
+@Composable
+private fun ThemeSwitch(dark: Boolean, pal: CalcPalette, onToggle: () -> Unit) {
+    val thumbX by animateDpAsState(
+        targetValue = if (dark) 0.dp else 34.dp,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 500f),
+        label = "calcThumb"
+    )
+    val moonTint by animateColorAsState(if (dark) pal.switchActive else pal.switchInactive, label = "moon")
+    val sunTint by animateColorAsState(if (dark) pal.switchInactive else pal.switchActive, label = "sun")
+    val shape = RoundedCornerShape(50)
+    val label = stringResource(R.string.calc_theme_switch)
+    val stateText = stringResource(if (dark) R.string.calc_theme_dark else R.string.calc_theme_light)
+    Box(
+        modifier = Modifier
+            .width(72.dp)
+            .height(38.dp)
+            .clip(shape)
+            .background(pal.switchTrack)
+            .border(1.dp, pal.switchBorder, shape)
+            .semantics {
+                contentDescription = label
+                stateDescription = stateText
+            }
+            .clickable(role = Role.Switch, onClick = onToggle)
+            .padding(3.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbX)
+                .size(32.dp)
+                .clip(shape)
+                .background(pal.switchThumb)
+        )
+        Row {
+            Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_calc_moon),
+                    contentDescription = null,
+                    tint = moonTint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.width(2.dp))
+            Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_calc_sun),
+                    contentDescription = null,
+                    tint = sunTint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

@@ -156,6 +156,9 @@
     <string name="clock_pill_description">Time %1$s, date %2$s</string>
     <string name="clock_choose_colour">Change clock background colour</string>
     <string name="clock_open_calculator">Open calculator</string>
+    <string name="calc_theme_switch">Calculator theme</string>
+    <string name="calc_theme_dark">Dark</string>
+    <string name="calc_theme_light">Light</string>
     <string name="calc_backspace">Delete</string>
     <string name="calc_equals">Equals</string>
     <string name="clock_colour_0">Pure Black</string>

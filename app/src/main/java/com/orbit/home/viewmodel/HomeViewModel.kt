@@ -117,6 +117,8 @@ data class HomeUiState(
     /** Whether the hidden wallpaper is the one showing. */
     val hiddenWallpaperShowing: Boolean = false,
     val clockColour: Int = 3,
+    /** Whether the calculator is in its dark theme. */
+    val calcDark: Boolean = true,
     val clockX: Float = 0.5f,
     val clockY: Float = 0.06f,
     val clockTextScale: Float = 1f,
@@ -317,6 +319,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         settingsLoaded = true,
                         hiddenWallpaperShowing = s.hiddenWallpaperShowing,
             clockColour = s.clockColour,
+            calcDark = s.calcDark,
             clockX = s.clockX,
             clockY = s.clockY,
             clockTextScale = s.clockTextScale,
@@ -792,6 +795,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** The clock bar's background, by position in the palette. */
     fun setClockColour(index: Int) {
         viewModelScope.launch { preferences.setClockColour(index) }
+    }
+
+    /** The calculator's theme. */
+    fun setCalcDark(dark: Boolean) {
+        viewModelScope.launch { preferences.setCalcDark(dark) }
     }
 
     /** Where the time bar sits on the home screen, and how big and how long it is. */
