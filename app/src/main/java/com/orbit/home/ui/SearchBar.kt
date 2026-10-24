@@ -15,6 +15,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -32,7 +34,11 @@ fun OrbitSearchBar(
     /** Runs when the keyboard's Search key is pressed. */
     onSearch: () -> Unit = {},
     /** Optional requester, so the drawer can open with the field focused (P2). */
-    focusRequester: FocusRequester? = null
+    focusRequester: FocusRequester? = null,
+    /** The field's outline. The drawer asks for a full pill. */
+    shape: Shape = RoundedCornerShape(18.dp),
+    /** Draws no border until the field is focused. Off, the field keeps its quiet grey outline. */
+    quietBorder: Boolean = false
 ) {
     OutlinedTextField(
         value = query,
@@ -41,7 +47,7 @@ fun OrbitSearchBar(
             .fillMaxWidth()
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
         singleLine = true,
-        shape = RoundedCornerShape(18.dp),
+        shape = shape,
         placeholder = {
             Text(text = stringResource(R.string.search_hint), color = OrbitColors.TextSecondary)
         },
@@ -63,7 +69,7 @@ fun OrbitSearchBar(
             focusedContainerColor = OrbitColors.Surface,
             unfocusedContainerColor = OrbitColors.Surface,
             focusedBorderColor = OrbitColors.Accent,
-            unfocusedBorderColor = OrbitColors.Guide,
+            unfocusedBorderColor = if (quietBorder) Color.Transparent else OrbitColors.Guide,
             focusedTextColor = OrbitColors.TextPrimary,
             unfocusedTextColor = OrbitColors.TextPrimary,
             cursorColor = OrbitColors.Accent

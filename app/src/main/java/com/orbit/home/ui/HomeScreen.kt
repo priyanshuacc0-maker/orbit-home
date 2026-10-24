@@ -187,6 +187,15 @@ private const val DRAWER_DAMPING = 0.9f
 /** How far, as a share of the drawer's travel, a downward pull must go before it closes on release. */
 private const val DRAWER_CLOSE_FRACTION = 0.25f
 
+/**
+ * How firmly the drawer springs shut. Stiffer than the way up and critically damped, so closing is
+ * quick and lands without a bounce: leaving should never make anyone wait.
+ */
+private const val DRAWER_CLOSE_SPRING = 900f
+
+/** How far the home screen shrinks, at most, behind a fully raised drawer. 1 is not at all. */
+private const val DRAWER_HOME_SCALE = 0.94f
+
 /** How much of the screen's height a finger travels to bring the drawer all the way up. */
 private const val DRAWER_TRAVEL_FRACTION = 0.5f
 
@@ -371,13 +380,24 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 drawer.snapTo(drawerHeld)
                 drawerHeld = -1f
             }
-            drawer.animateTo(
-                targetValue = if (state.drawerOpen) 1f else 0f,
-                animationSpec = spring(
+            val opening = state.drawerOpen
+            val spec: androidx.compose.animation.core.AnimationSpec<Float> = when {
+                // Reduced motion: the drawer still arrives and leaves, it just does not travel.
+                state.reducedMotion -> androidx.compose.animation.core.snap()
+                opening -> spring(
                     dampingRatio = DRAWER_DAMPING,
                     stiffness = DRAWER_SPRING,
                     visibilityThreshold = 0.001f
-                ),
+                )
+                else -> spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = DRAWER_CLOSE_SPRING,
+                    visibilityThreshold = 0.001f
+                )
+            }
+            drawer.animateTo(
+                targetValue = if (opening) 1f else 0f,
+                animationSpec = spec,
                 initialVelocity = drawerReleaseVelocity
             )
             drawerReleaseVelocity = 0f
@@ -690,6 +710,18 @@ fun HomeScreen(viewModel: HomeViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // The home screen sinks back as the drawer comes up and returns as it goes, so the
+                // drawer reads as a layer in front of it rather than a sheet laid on top. Not while an
+                // app is being carried out of the drawer: the home grid is the drop target then, and
+                // it has to be exactly where it looks.
+                .graphicsLayer {
+                    if (!state.reducedMotion && appDrag == null) {
+                        val p = drawerShown().coerceIn(0f, 1f)
+                        val scale = 1f - (1f - DRAWER_HOME_SCALE) * p
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                }
                 .systemBarsPadding()
                 // Touch is blocked by the panels above; this stops a screen reader landing on the
                 // hidden menu, wheel and dock behind them too.
@@ -1107,6 +1139,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     },
                     grid = state.drawerGrid,
                     onToggleGrid = { viewModel.setDrawerGrid(!state.drawerGrid) },
+                    progress = { if (state.reducedMotion) 1f else drawerShown() },
                     // The home screen's own drawer, so this is where an app can be put on it.
                     onAddToHome = { app -> viewModel.addAppToGridHome(app.id) },
                     homeAppIds = state.homeApps.toSet(),

@@ -73,6 +73,10 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -80,12 +84,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,8 +103,15 @@ import com.orbit.home.apps.AppSearch
 import com.orbit.home.apps.InstalledApp
 import com.orbit.home.ui.theme.OrbitColors
 
-/** How many icons across in grid mode. Four keeps labels readable. */
-private const val GRID_COLUMNS = 4
+/**
+ * The narrowest a grid column may be. Adaptive, so a phone gets four icons across and a wider screen
+ * gets five or more, the way Quickstep scales its grid, rather than four stretched ever further apart.
+ */
+private val GRID_MIN_CELL = 80.dp
+
+/** Icon sizes in the drawer: a touch larger than the home grid's, so the drawer reads as the roomy one. */
+private val GRID_ICON = 58.dp
+private val ROW_ICON = 48.dp
 
 /**
  * The all-apps drawer: every installed app, searchable, as a list or a grid.
@@ -132,6 +145,12 @@ fun AllAppsOverlay(
     /** Finger lifted after a dismiss pull: distance in px and downward velocity in px/s. */
     onDismissRelease: ((pullPx: Float, velocityY: Float) -> Unit)? = null,
     /**
+     * How far up the drawer is, 0 to 1, read inside a graphics layer so it costs no recomposition.
+     * The contents settle in a beat behind the panel: they fade up and rise a little as it arrives,
+     * and ease away as it leaves. Left at 1 (Settings) the contents simply sit there.
+     */
+    progress: () -> Float = { 1f },
+    /**
      * Drag an app out of the drawer onto the home screen, the way Quickstep does. Null where dragging
      * out makes no sense (Settings, or a home that is a wheel). Positions are in root coordinates.
      * A hold that is not carried anywhere still opens the app's menu.
@@ -152,6 +171,21 @@ fun AllAppsOverlay(
     // Ranked rather than a plain filter: an exact name beats a prefix, which beats a
     // word match, an initialism, a substring, and finally a package name.
     val filtered = remember(ordered, query) { AppSearch.filter(ordered, query) }
+
+    // Section headers and the A-Z strip only make sense in alphabetical order. A search ranks by
+    // relevance, so while one is typed the list is shown as ranked, with neither.
+    val browsing = query.isBlank()
+    val sections = remember(filtered, browsing) {
+        if (browsing) DrawerIndex.sections(filtered) { it.label } else emptyList()
+    }
+    // Grouped by section so what is drawn and what the strip scrolls to are the same order.
+    val shown = remember(filtered, sections, browsing) {
+        if (browsing) sections.flatMap { it.items } else filtered
+    }
+    val showRail = browsing && sections.size in 2..DrawerIndex.MAX_RAIL_KEYS
+    val railKeys = remember(sections) { sections.map { it.key } }
+    val railPad = if (showRail) 20.dp else 0.dp
+    val scope = rememberCoroutineScope()
 
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
@@ -331,6 +365,11 @@ fun AllAppsOverlay(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    val p = progress().coerceIn(0f, 1f)
+                    alpha = ((p - 0.3f) / 0.5f).coerceIn(0f, 1f)
+                    translationY = (1f - p) * 28.dp.toPx()
+                }
                 .offset {
                     // When the host drives the drawer, it moves the whole panel; no extra offset.
                     if (onDismissDrag != null) IntOffset.Zero
@@ -346,7 +385,26 @@ fun AllAppsOverlay(
                 // is already at the top and a downward swipe should close the drawer.
                 .nestedScroll(dismissConnection)
         ) {
-            Spacer(Modifier.height(12.dp))
+            if (onDismissDrag != null) {
+                // The grab handle every sheet has. It is also a drag target, so the drawer can be
+                // pulled down from the very top of it as well as from the list.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(dismissDrag)
+                        .padding(top = 10.dp, bottom = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 36.dp, height = 4.dp)
+                            .clip(CircleShape)
+                            .background(OrbitColors.TextSecondary.copy(alpha = 0.45f))
+                    )
+                }
+            } else {
+                Spacer(Modifier.height(12.dp))
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -362,6 +420,10 @@ fun AllAppsOverlay(
                     // The keyboard's Search key opens the best match.
                     onSearch = { filtered.firstOrNull()?.let(onLaunch) },
                     focusRequester = focusRequester,
+                    // A full pill with no outline until it is focused: the search field of a
+                    // Pixel or iOS drawer, not a form input.
+                    shape = RoundedCornerShape(28.dp),
+                    quietBorder = true,
                     modifier = Modifier.weight(1f)
                 )
                 DrawerModeButton(
@@ -372,6 +434,9 @@ fun AllAppsOverlay(
             }
             Spacer(Modifier.height(8.dp))
 
+            // The content fills what is left under the header, and the A-Z strip floats over its
+            // right edge.
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             if (filtered.isEmpty()) {
                 AppEmptyState(
                     icon = Icons.Filled.Search,
@@ -381,18 +446,25 @@ fun AllAppsOverlay(
                 )
             } else if (grid) {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(GRID_COLUMNS),
+                    columns = GridCells.Adaptive(minSize = GRID_MIN_CELL),
                     state = gridState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(
+                        start = 8.dp,
+                        end = 8.dp + railPad,
+                        top = 4.dp,
+                        bottom = 24.dp
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(items = filtered, key = { it.id }) { app ->
+                    items(items = shown, key = { it.id }) { app ->
                         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                             AppCell(
                                 app = app,
                                 iconLoader = iconLoader,
+                                iconSize = GRID_ICON,
+                                labelStyle = MaterialTheme.typography.bodySmall,
                                 onLaunch = {
                                     keyboard?.hide()
                                     onLaunch(app)
@@ -426,13 +498,9 @@ fun AllAppsOverlay(
                     }
                 }
             } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp)
-                ) {
-                    items(items = filtered, key = { it.id }) { app ->
-                        Box {
+                // One row, written once and used both under a section header and in a ranked search.
+                val listRow: @Composable (InstalledApp) -> Unit = { app ->
+                    Box {
                             AppRow(
                                 app = app,
                                 iconLoader = iconLoader,
@@ -464,11 +532,52 @@ fun AllAppsOverlay(
                                 } else null
                             )
                         }
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(end = railPad, bottom = 24.dp)
+                ) {
+                    if (browsing) {
+                        sections.forEach { section ->
+                            item(key = "section-${section.key}") { SectionHeader(section.key) }
+                            items(items = section.items, key = { it.id }) { app -> listRow(app) }
+                        }
+                    } else {
+                        items(items = filtered, key = { it.id }) { app -> listRow(app) }
                     }
                 }
             }
+            if (showRail) {
+                DrawerLetterRail(
+                    keys = railKeys,
+                    onScrub = { key ->
+                        scope.launch {
+                            if (grid) gridState.scrollToItem(DrawerIndex.gridIndex(sections, key))
+                            else listState.scrollToItem(DrawerIndex.listIndex(sections, key))
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
+            }
+            }
         }
     }
+}
+
+/** The letter above each run of apps in the list, quiet enough to sit behind the names. */
+@Composable
+private fun SectionHeader(key: String) {
+    Text(
+        text = key,
+        color = OrbitColors.TextSecondary,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 28.dp, end = 16.dp, top = 14.dp, bottom = 2.dp)
+            .semantics { heading() }
+    )
 }
 
 /** One drawer row: icon, label, and the whole row is the touch target. */
@@ -483,7 +592,7 @@ private fun AppRow(
 ) {
     val openLabel = stringResource(R.string.app_open_label, app.label)
     val optionsLabel = stringResource(R.string.drawer_app_options)
-    val px = with(LocalDensity.current) { 44.dp.roundToPx() }
+    val px = with(LocalDensity.current) { ROW_ICON.roundToPx() }
     val icon = rememberAppIcon(app.id, px, iconLoader)
 
     Row(
@@ -510,7 +619,7 @@ private fun AppRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(ROW_ICON), contentAlignment = Alignment.Center) {
             if (icon != null) {
                 Image(
                     bitmap = icon,
@@ -611,11 +720,15 @@ internal fun AppCell(
     /** Press and hold. Null where the caller handles the hold itself, as the grid home does. */
     onLongPress: (() -> Unit)? = null,
     /** Hold then drag out of the drawer. Null everywhere but the drawer. */
-    dragSource: AppDragCallbacks? = null
+    dragSource: AppDragCallbacks? = null,
+    /** The icon's size. The home grid keeps the default; the drawer asks for a larger one. */
+    iconSize: Dp = 52.dp,
+    /** The label's type. Null is the small label the home grid has always used. */
+    labelStyle: androidx.compose.ui.text.TextStyle? = null
 ) {
     val openLabel = stringResource(R.string.app_open_label, app.label)
     val optionsLabel = stringResource(R.string.drawer_app_options)
-    val px = with(LocalDensity.current) { 52.dp.roundToPx() }
+    val px = with(LocalDensity.current) { iconSize.roundToPx() }
     val icon = rememberAppIcon(app.id, px, iconLoader)
 
     Column(
@@ -646,7 +759,7 @@ internal fun AppCell(
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(modifier = Modifier.size(52.dp), contentAlignment = Alignment.Center) {
+        Box(modifier = Modifier.size(iconSize), contentAlignment = Alignment.Center) {
             if (icon != null) {
                 Image(
                     bitmap = icon,
@@ -668,7 +781,7 @@ internal fun AppCell(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelSmall.copy(shadow = LABEL_SHADOW)
+            style = (labelStyle ?: MaterialTheme.typography.labelSmall).copy(shadow = LABEL_SHADOW)
         )
     }
 }
@@ -697,8 +810,9 @@ private fun DrawerModeButton(toGrid: Boolean, onClick: () -> Unit) {
     )
     Box(
         modifier = Modifier
-            .size(48.dp)
-            .clip(RoundedCornerShape(16.dp))
+            // As tall as the search pill beside it, and as round.
+            .size(56.dp)
+            .clip(CircleShape)
             .background(OrbitColors.Surface)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = label },
