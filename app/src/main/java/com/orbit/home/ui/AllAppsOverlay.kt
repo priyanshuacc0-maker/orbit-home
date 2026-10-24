@@ -18,6 +18,12 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.material3.Icon
@@ -411,7 +417,6 @@ fun AllAppsOverlay(
                             )
                             if (menuFor == app.id) DrawerAppMenu(
                                 app = app,
-                                expanded = true,
                                 onDismiss = { menuFor = null },
                                 onAddToHome = if (onAddToHome != null && app.id !in homeAppIds) {
                                     { onAddToHome.invoke(app) }
@@ -453,7 +458,6 @@ fun AllAppsOverlay(
                             )
                             if (menuFor == app.id) DrawerAppMenu(
                                 app = app,
-                                expanded = true,
                                 onDismiss = { menuFor = null },
                                 onAddToHome = if (onAddToHome != null && app.id !in homeAppIds) {
                                     { onAddToHome.invoke(app) }
@@ -529,53 +533,62 @@ private fun AppRow(
 }
 
 /**
- * What a press and hold on an app in the drawer offers: put it on the home screen, see its settings, or
- * take it off the phone. A menu on the app itself, which is where a person looks for these, instead of a
- * button drawn over every icon.
+ * What a press and hold on an app in the drawer offers. It is the home screen's own [AppMenu], so the two
+ * look and animate the same: below the app (above it when there is no room), growing out of the app.
  *
  * [onAddToHome] is null for an app that is already on the home screen, so it is not offered twice.
  */
 @Composable
 private fun DrawerAppMenu(
     app: InstalledApp,
-    expanded: Boolean,
     onDismiss: () -> Unit,
     onAddToHome: (() -> Unit)?
 ) {
     val context = LocalContext.current
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        modifier = Modifier.background(OrbitColors.SurfaceHigh)
-    ) {
-        if (onAddToHome != null) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.drawer_add_to_home), color = OrbitColors.TextPrimary) },
-                leadingIcon = {
-                    Icon(Icons.Filled.Add, contentDescription = null, tint = OrbitColors.TextPrimary)
-                },
-                onClick = {
-                    onDismiss()
-                    onAddToHome()
-                }
-            )
+    val density = LocalDensity.current
+    var below by remember { mutableStateOf(true) }
+    var originX by remember { mutableStateOf(0.5f) }
+    var placed by remember { mutableStateOf(false) }
+    val provider = remember(density) {
+        val gap = with(density) { 6.dp.roundToPx() }
+        val margin = with(density) { 16.dp.roundToPx() }
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize
+            ): IntOffset {
+                val maxX = (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
+                val x = (anchorBounds.center.x - popupContentSize.width / 2).coerceIn(margin, maxX)
+                val fitsBelow = anchorBounds.bottom + gap + popupContentSize.height <= windowSize.height - margin
+                val y = if (fitsBelow) anchorBounds.bottom + gap
+                else (anchorBounds.top - gap - popupContentSize.height).coerceAtLeast(margin)
+                below = fitsBelow
+                originX = ((anchorBounds.center.x - x).toFloat() / popupContentSize.width.coerceAtLeast(1))
+                    .coerceIn(0.1f, 0.9f)
+                placed = true
+                return IntOffset(x, y)
+            }
         }
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.app_info), color = OrbitColors.TextPrimary) },
-            leadingIcon = {
-                Icon(Icons.Filled.Info, contentDescription = null, tint = OrbitColors.TextPrimary)
-            },
-            onClick = {
+    }
+    Popup(
+        popupPositionProvider = provider,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true)
+    ) {
+        AppMenu(
+            app = app,
+            fromTop = below,
+            originX = originX,
+            ready = placed,
+            onAddToHome = onAddToHome?.let { add -> { onDismiss(); add() } },
+            onAppInfo = {
                 onDismiss()
                 AppActions.openAppInfo(context, app.packageName)
-            }
-        )
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.app_uninstall), color = OrbitColors.TextPrimary) },
-            leadingIcon = {
-                Icon(Icons.Filled.Delete, contentDescription = null, tint = OrbitColors.TextPrimary)
             },
-            onClick = {
+            onRemove = null,
+            onUninstall = {
                 onDismiss()
                 AppActions.uninstall(context, app.packageName)
             }

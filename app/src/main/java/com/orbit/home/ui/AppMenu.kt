@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
@@ -49,9 +50,11 @@ import com.orbit.home.ui.theme.OrbitColors
 internal fun AppMenu(
     app: InstalledApp,
     onAppInfo: () -> Unit,
-    onRemove: () -> Unit,
+    onRemove: (() -> Unit)?,
     onUninstall: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Offered first, by the drawer only: put the app on the home screen. */
+    onAddToHome: (() -> Unit)? = null,
     /** True when the menu is below the app, so it grows downwards from its top edge. */
     fromTop: Boolean = true,
     /** Where along the menu's width the app is, 0 to 1: the point the menu grows out of. */
@@ -75,18 +78,28 @@ internal fun AppMenu(
             .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
             .padding(vertical = 6.dp)
     ) {
+        if (onAddToHome != null) {
+            MenuRow(
+                icon = Icons.Filled.Add,
+                label = stringResource(R.string.drawer_add_to_home),
+                onClick = onAddToHome
+            )
+            MenuDivider()
+        }
         MenuRow(
             icon = Icons.Filled.Info,
             label = stringResource(R.string.app_info),
             onClick = onAppInfo
         )
         MenuDivider()
-        MenuRow(
-            icon = Icons.Filled.Close,
-            label = stringResource(R.string.app_remove),
-            onClick = onRemove
-        )
-        MenuDivider()
+        if (onRemove != null) {
+            MenuRow(
+                icon = Icons.Filled.Close,
+                label = stringResource(R.string.app_remove),
+                onClick = onRemove
+            )
+            MenuDivider()
+        }
         MenuRow(
             icon = Icons.Filled.Delete,
             label = stringResource(R.string.app_uninstall),

@@ -41,8 +41,8 @@ android {
         applicationId = "com.orbit.home"
         minSdk = 26
         targetSdk = 36
-        versionCode = 241
-        versionName = "1.166.7"
+        versionCode = 242
+        versionName = "1.166.8"
         vectorDrawables { useSupportLibrary = true }
     }
 

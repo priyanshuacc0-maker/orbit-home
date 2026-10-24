@@ -88,6 +88,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.annotation.StringRes
@@ -182,6 +183,17 @@ class ShortcutWheelService : Service() {
      */
     private var hopHidden by mutableStateOf(false)
     private var hopJob: Job? = null
+
+    /**
+     * The glide from one edge to the next. [hopFrom] is where the handle window was when the bar left
+     * its edge; until [hopGlide] reaches 1 the window is drawn that far of the way from there to where
+     * the edge and the finger now say it belongs. A window cannot be animated by the system without
+     * the jump, so it is moved a frame at a time here, on an ease-out curve, instead of vanishing and
+     * reappearing.
+     */
+    private var hopGlide by mutableFloatStateOf(1f)
+    private var hopFrom: EdgeDockGeometry.Rect? = null
+    private var hopAnimator: ValueAnimator? = null
 
     /** True once a held-still finger has picked the handle up to be carried to any edge. */
     private var carrying by mutableStateOf(false)
@@ -616,6 +628,7 @@ class ShortcutWheelService : Service() {
     override fun onDestroy() {
         running = false
         cancelSettle()
+        hopAnimator?.cancel()
         runCatching { if (::handleRoot.isInitialized) windowManager.removeView(handleRoot) }
         runCatching { if (::wheelRoot.isInitialized) windowManager.removeView(wheelRoot) }
         runCatching { if (::owner.isInitialized) owner.destroy() }
@@ -892,12 +905,48 @@ class ShortcutWheelService : Service() {
      */
     private fun beginHop(edge: DockEdge) {
         hopJob?.cancel()
-        hopHidden = true
+        hopHidden = false
+        // Where the handle is drawn right now, mid-glide included, so a second hop carries on from it.
+        val from = if (::handleParams.isInitialized) EdgeDockGeometry.Rect(
+            handleParams.x + originShiftX, handleParams.y + originShiftY,
+            handleParams.width, handleParams.height
+        ) else null
         dockEdge = edge
-        hopJob = scope.launch {
-            delay(HOP_SETTLE_MS)
-            hopHidden = false
+        hopAnimator?.cancel()
+        if (from == null || !motionEnabled()) {
+            hopFrom = null
+            hopGlide = 1f
+            return
         }
+        hopFrom = from
+        hopGlide = 0f
+        hopAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = HOP_GLIDE_MS
+            // Fast off the mark, long soft landing: the curve Apple's own UI leans on.
+            interpolator = android.view.animation.PathInterpolator(0.22f, 1f, 0.36f, 1f)
+            addUpdateListener {
+                hopGlide = it.animatedValue as Float
+                applyFrames(handleOnly = true)
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: Animator) {
+                    if (cancelled) return
+                    hopFrom = null
+                    hopGlide = 1f
+                    applyFrames(handleOnly = true)
+                }
+            })
+            start()
+        }
+    }
+
+    private fun lerpRect(
+        a: EdgeDockGeometry.Rect, b: EdgeDockGeometry.Rect, t: Float
+    ): EdgeDockGeometry.Rect {
+        fun mix(x: Int, y: Int) = (x + (y - x) * t).roundToInt()
+        return EdgeDockGeometry.Rect(mix(a.x, b.x), mix(a.y, b.y), mix(a.width, b.width), mix(a.height, b.height))
     }
 
     /**
@@ -982,12 +1031,15 @@ class ShortcutWheelService : Service() {
                 EdgeDockGeometry.wheelWindow(edge, area, wheelSizePx, fraction, handleLengthPx)
             )
         }
+        val handleTarget = EdgeDockGeometry.handleWindow(
+            edge, area, wheelSizePx, handleThicknessPx, handleLengthPx, fraction, handleLengthPx
+        )
+        val glideFrom = hopFrom
         setBounds(
             handleRoot,
             handleParams,
-            EdgeDockGeometry.handleWindow(
-                edge, area, wheelSizePx, handleThicknessPx, handleLengthPx, fraction, handleLengthPx
-            )
+            if (glideFrom != null && hopGlide < 1f) lerpRect(glideFrom, handleTarget, hopGlide)
+            else handleTarget
         )
         updateGestureExclusion()
     }
@@ -1489,8 +1541,11 @@ class ShortcutWheelService : Service() {
                     // transition recomposes nothing. This is how it behaved before the edge audit took it away.
                     .graphicsLayer {
                         val a = if (hopHidden) 0f else arrive
-                        alpha = (1f - progress * HANDLE_FADE).coerceIn(0f, 1f) * a.coerceIn(0f, 1f)
-                        val scale = (0.8f + 0.2f * arrive) * (1f + 0.15f * lift)
+                        // Fades in over the first part of a glide, so the pill is never seen
+                        // squeezed into a window that still has the old edge's shape.
+                        val glide = (hopGlide * 4f).coerceIn(0f, 1f)
+                        alpha = (1f - progress * HANDLE_FADE).coerceIn(0f, 1f) * a.coerceIn(0f, 1f) * glide
+                        val scale = (0.8f + 0.2f * arrive) * (0.9f + 0.1f * glide) * (1f + 0.15f * lift)
                         scaleX = scale
                         scaleY = scale
                         // Out from under the finger: starts inward of the edge and settles on it.
@@ -1710,6 +1765,9 @@ class ShortcutWheelService : Service() {
 
         /** Time for the windows to take their new shape after a hop before the tab returns. */
         private const val HOP_SETTLE_MS = 64L
+
+        /** How long the bar takes to glide from one edge to the next. */
+        private const val HOP_GLIDE_MS = 320L
 
         private const val ORIGIN_SETTLE_MS = 350L
         private const val ORIGIN_SAMPLE_MS = 120L

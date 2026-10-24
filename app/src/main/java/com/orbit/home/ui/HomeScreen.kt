@@ -344,6 +344,9 @@ fun HomeScreen(viewModel: HomeViewModel) {
     // composed - but invisible - because the icon that owns the finger lives in it, and removing that
     // node would cancel the drag.
     var appDrag by remember { mutableStateOf<ExternalAppDrag?>(null) }
+    // Where the carried app is. Kept apart from [appDrag] and read only at layout / inside the grid, so a
+    // finger move no longer recomposes this whole screen (that was the stutter, unlike a drag within the grid).
+    var appDragPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val drawerShown: () -> Float = {
         when {
             drawerPull >= 0f -> drawerPull
@@ -783,6 +786,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     iconLoader = viewModel.iconLoader,
                     onLaunch = viewModel::launch,
                     externalDrag = appDrag,
+                    externalPosition = { appDragPos },
                     onExternalDragDone = { appDrag = null },
                     reducedMotion = state.reducedMotion,
                     modifier = Modifier
@@ -1079,12 +1083,16 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     // for the wheel, or before the grid has been arranged (Add to home refuses then too).
                     onAppDragStart = if (state.homeGrid && state.homeInitialized) {
                         { app, at ->
+                            appDragPos = at
                             appDrag = ExternalAppDrag(app.id, at.x, at.y)
                             viewModel.setDrawerOpen(false)
                         }
                     } else null,
-                    onAppDragMove = { at -> appDrag = appDrag?.copy(x = at.x, y = at.y) },
-                    onAppDragEnd = { at -> appDrag = appDrag?.copy(x = at.x, y = at.y, released = true) },
+                    onAppDragMove = { at -> appDragPos = at },
+                    onAppDragEnd = { at ->
+                        appDragPos = at
+                        appDrag = appDrag?.copy(x = at.x, y = at.y, released = true)
+                    },
                     onAppDragCancel = { appDrag = null }
                 )
                 }
@@ -1102,7 +1110,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                 val hPx = with(LocalDensity.current) { ghostH.toPx() }
                 Box(
                     modifier = Modifier
-                        .offset { IntOffset((carry.x - wPx / 2f).roundToInt(), (carry.y - hPx / 2f).roundToInt()) }
+                        .offset { IntOffset((appDragPos.x - wPx / 2f).roundToInt(), (appDragPos.y - hPx / 2f).roundToInt()) }
                         .width(ghostW)
                         .height(ghostH)
                         .graphicsLayer {

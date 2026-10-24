@@ -108,6 +108,8 @@ fun GridHome(
      * [ExternalAppDrag.released] is set the app is dropped there and [onExternalDragDone] is called.
      */
     externalDrag: ExternalAppDrag? = null,
+    /** The carried app's live position, read here so only the grid recomposes as the finger moves. */
+    externalPosition: (() -> Offset)? = null,
     onExternalDragDone: () -> Unit = {},
     /** With motion off, apps still get out of the way - they just arrive in one frame. */
     reducedMotion: Boolean = false,
@@ -159,7 +161,9 @@ fun GridHome(
     // the same as an app dragged in from the drawer - so everything that drop already knows applies.
     var folderDrag by remember { mutableStateOf<ExternalAppDrag?>(null) }
     // The drawer's drag if there is one, otherwise the one out of a folder.
-    val activeDrag = externalDrag ?: folderDrag
+    val activeDrag = externalDrag?.let { d ->
+        externalPosition?.invoke()?.let { p -> d.copy(x = p.x, y = p.y) } ?: d
+    } ?: folderDrag
     // The folder that is open, if any.
     var openFolderId by remember { mutableStateOf<String?>(null) }
     // The cell a carried app has been held over long enough that dropping it will make or fill a
