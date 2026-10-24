@@ -75,6 +75,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.setValue
@@ -1487,6 +1490,8 @@ private fun CentreVideoView(player: ExoPlayer, transform: CentreTransform, modif
 private fun ClockPill(colourIndex: Int, onPickColour: (Int) -> Unit, modifier: Modifier = Modifier) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
     var choosing by remember { mutableStateOf(false) }
+    var calculating by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
     val colour = CLOCK_COLOURS.getOrElse(colourIndex) { CLOCK_COLOURS[3] }
     // On a light bar the text has to go dark, or the time is white on white.
     val ink = if (colourIndex >= 8) CLOCK_INK_ON_LIGHT else OrbitColors.TextPrimary
@@ -1495,6 +1500,7 @@ private fun ClockPill(colourIndex: Int, onPickColour: (Int) -> Unit, modifier: M
     val dateText = now.format(CLOCK_DATE)
     val clockDescription = stringResource(R.string.clock_pill_description, timeText, dateText)
     val chooseColourLabel = stringResource(R.string.clock_choose_colour)
+    val openCalculatorLabel = stringResource(R.string.clock_open_calculator)
     LaunchedEffect(Unit) {
         while (true) {
             now = LocalDateTime.now()
@@ -1506,21 +1512,34 @@ private fun ClockPill(colourIndex: Int, onPickColour: (Int) -> Unit, modifier: M
             .clip(RoundedCornerShape(50))
             .background(colour)
             .padding(horizontal = 18.dp, vertical = 8.dp)
-            // Keep the deliberate double-tap gesture, but also expose a semantic button action so
-            // TalkBack and switch access can open the same chooser.
+            // Double tap opens the calculator, press and hold opens the colour chooser. Both are also
+            // exposed as semantic actions so TalkBack and switch access can reach them.
             .semantics(mergeDescendants = true) {
                 contentDescription = clockDescription
                 role = Role.Button
-                onClick(label = chooseColourLabel) {
+                onClick(label = openCalculatorLabel) {
+                    calculating = true
+                    true
+                }
+                onLongClick(label = chooseColourLabel) {
                     choosing = true
                     true
                 }
             }
             .pointerInput(Unit) {
-                detectTapGestures(onDoubleTap = { choosing = true })
+                detectTapGestures(
+                    onDoubleTap = { calculating = true },
+                    onLongPress = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        choosing = true
+                    }
+                )
             },
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (calculating) {
+            CalculatorDialog(onDismiss = { calculating = false })
+        }
         if (choosing) {
             ClockColourChooser(
                 chosen = colourIndex,
