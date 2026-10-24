@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Keep preferences and their referenced custom media together on cloud backup and
+  device-to-device transfer. Widget ids are reconciled at startup rather than trusted
+  after a restore (remediation 2.9). Backing up centre videos can increase the payload.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="datastore" />
+        <include domain="file" path="centres" />
+        <include domain="file" path="wallpapers" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="datastore" />
+        <include domain="file" path="centres" />
+        <include domain="file" path="wallpapers" />
+    </device-transfer>
+</data-extraction-rules>

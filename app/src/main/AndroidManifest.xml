@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The floating shortcut wheel is a window drawn over other apps. This is a
+         special permission the user grants in Settings; it is asked for only when
+         the feature is switched on, never at launch. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Orbit emits short, user-triggered tactile feedback. Normal permission; no runtime prompt. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+        Only for the wallpaper fallback, used when a device has no wallpaper cropping screen.
+        The normal route hands the picture to Android's own crop-and-set workflow and needs no
+        permission at all. Never used to change the lock screen.
+    -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+
+    <!-- A window that stays over other apps has to be hosted by a foreground
+         service, and Android requires that service to show a notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Uninstalling hands over to the system, which asks before it removes anything. From Android 14
+         the system refuses to show that screen unless the app holds this. It is a normal permission:
+         granted at install, no prompt, and it lets the app ask, never remove. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <!-- Narrow package visibility. Orbit Home needs to see standard launcher
+         entries (for the wheel and All apps), apps that can handle Home, and a
+         dialer (for the default dock). No QUERY_ALL_PACKAGES is requested. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.OrbitHome">
+
+        <!-- The real home screen. Android launches this when the user presses
+             Home once Orbit Home is chosen as the default home app. -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|fontScale|density|locale|layoutDirection"
+            android:theme="@style/Theme.OrbitHome.Home">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Hosts the floating shortcut wheel. Foreground, because a window over
+             other apps is not allowed to be hosted by a service the system may kill
+             whenever it likes. -->
+        <service
+            android:name=".overlay.ShortcutWheelService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating app shortcut wheel, shown over other apps at the user's request" />
+        </service>
+
+        <!-- The normal app-drawer entry: setup and settings. -->
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.OrbitHome">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- The picker. No task affinity of its own: without the empty affinity,
+             FLAG_ACTIVITY_NEW_TASK can fold it into Orbit's singleTask home task, and finishing
+             it would drop the user on the home screen instead of back where they were. -->
+        <activity
+            android:name=".ShortcutPickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.OrbitHome"
+            android:taskAffinity=""
+            android:autoRemoveFromRecents="true"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- The floating wheel's app picker, reached by a single tap on the wheel's centre in
+             app mode. Same shape as the shortcut picker above, and for the same reasons. -->
+        <activity
+            android:name=".FloatingAppsPickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.OrbitHome"
+            android:taskAffinity=""
+            android:autoRemoveFromRecents="true"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+
+</manifest>

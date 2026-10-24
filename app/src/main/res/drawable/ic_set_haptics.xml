@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M24 0a24 24 0 1 0 0 48a24 24 0 1 0 0 -48" />
+    <group android:translateX="12" android:translateY="12">
+        <!-- A phone, with a vibration line either side. -->
+        <path android:fillColor="#00000000" android:strokeColor="#7C5CFF" android:strokeWidth="2"
+            android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M9.5 5h5a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1 -1.5 1.5h-5a1.5 1.5 0 0 1 -1.5 -1.5v-11a1.5 1.5 0 0 1 1.5 -1.5z" />
+        <path android:fillColor="#00000000" android:strokeColor="#7C5CFF" android:strokeWidth="2"
+            android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M4.5 9v6M19.5 9v6M2 11v2M22 11v2" />
+    </group>
+</vector>

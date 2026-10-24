@@ -1,0 +1,30 @@
+<!--
+    The Orbit logo with its colours swapped for the shortcut centre: a white ring and a purple
+    planet, where the app wheel's logo is a purple ring and a white planet.
+
+    Otherwise identical to ic_orbit_logo, including the grey satellite, so the two read as the
+    same mark in two states rather than two different marks.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Orbit ring, white -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="7"
+        android:fillColor="#00000000"
+        android:pathData="M50,10 a40,40 0 1,0 0.01,0" />
+
+    <!-- Central planet, purple -->
+    <path
+        android:fillColor="#7C5CFF"
+        android:pathData="M50,28 a22,22 0 1,0 0.01,0" />
+
+    <!-- Orbiting satellite, unchanged -->
+    <path
+        android:fillColor="#A1A1AA"
+        android:pathData="M90,50 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+</vector>

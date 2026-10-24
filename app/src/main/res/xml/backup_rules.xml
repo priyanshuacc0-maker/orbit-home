@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Orbit Home deliberately participates in Android backup and device transfer: a
+  home-screen layout is worth keeping when you change phone.
+
+  Back up preferences and the local media those preferences can point at. Without the
+  centres/wallpapers entries, a restored layout could select images that were never restored.
+  Widget *ids* travel too, but they belong to the old device's host and cannot bind on the new
+  one, so they are dropped at startup (remediation 2.9). Media backup can grow with user videos.
+-->
+<full-backup-content>
+    <include domain="file" path="datastore" />
+    <include domain="file" path="centres" />
+    <include domain="file" path="wallpapers" />
+</full-backup-content>
