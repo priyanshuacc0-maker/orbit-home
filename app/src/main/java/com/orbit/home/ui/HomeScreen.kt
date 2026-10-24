@@ -1,5 +1,9 @@
 package com.orbit.home.ui
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.graphics.TransformOrigin
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -1585,77 +1589,104 @@ private val CLOCK_INK_ON_LIGHT_SOFT = Color(0xFF3A3A44)
  */
 @Composable
 private fun ClockColourChooser(chosen: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    val progress = rememberPopProgress()
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
+    fun dismiss() {
+        if (closing) return
+        closing = true
+        scope.launch {
+            progress.popOut()
+            onDismiss()
+        }
+    }
+    val shape = RoundedCornerShape(28.dp)
     Popup(
         alignment = Alignment.TopCenter,
         offset = IntOffset(0, 140),
-        onDismissRequest = onDismiss,
+        onDismissRequest = { dismiss() },
         properties = PopupProperties(focusable = true)
     ) {
-        Column(
-            modifier = Modifier
-                .width(360.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(OrbitColors.SurfaceHigh)
-                .padding(18.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(R.string.clock_bg_title),
-                    color = OrbitColors.TextPrimary,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.settings_back),
-                        tint = OrbitColors.TextSecondary
+        // The margin is part of the popup, so the panel never reaches the screen's edges.
+        Box(modifier = Modifier.padding(horizontal = 24.dp)) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 340.dp)
+                    .fillMaxWidth()
+                    .popTransform(
+                        progress = { progress.value },
+                        origin = TransformOrigin(0.5f, 0f),
+                        from = 0.88f,
+                        rise = (-10).dp
                     )
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-            for (row in 0 until 2) {
+                    .clip(shape)
+                    .background(OrbitColors.SurfaceHigh)
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
+                    .padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 20.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    for (col in 0 until 5) {
-                        val index = row * 5 + col
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .width(62.dp)
-                                .clickable { onPick(index) }
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(CLOCK_COLOURS[index])
-                                    .then(
-                                        if (index == chosen) {
-                                            Modifier.border(2.dp, Color.White, CircleShape)
-                                        } else {
-                                            Modifier.border(1.dp, OrbitColors.Guide, CircleShape)
-                                        }
-                                    )
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(CLOCK_COLOUR_NAMES[index]),
-                                color = OrbitColors.TextPrimary,
-                                style = MaterialTheme.typography.labelSmall,
-                                textAlign = TextAlign.Center,
-                                minLines = 2,
-                                maxLines = 2
-                            )
-                        }
+                    Text(
+                        text = stringResource(R.string.clock_bg_title),
+                        color = OrbitColors.TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { dismiss() }) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.settings_back),
+                            tint = OrbitColors.TextSecondary
+                        )
                     }
                 }
-                if (row == 0) Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(8.dp))
+                Column(modifier = Modifier.padding(end = 8.dp)) {
+                    for (row in 0 until 2) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            for (col in 0 until 5) {
+                                val index = row * 5 + col
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { onPick(index) }
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                            .background(CLOCK_COLOURS[index])
+                                            .then(
+                                                if (index == chosen) {
+                                                    Modifier.border(2.dp, Color.White, CircleShape)
+                                                } else {
+                                                    Modifier.border(1.dp, OrbitColors.Guide, CircleShape)
+                                                }
+                                            )
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = stringResource(CLOCK_COLOUR_NAMES[index]),
+                                        color = if (index == chosen) OrbitColors.TextPrimary else OrbitColors.TextSecondary,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        textAlign = TextAlign.Center,
+                                        minLines = 2,
+                                        maxLines = 2
+                                    )
+                                }
+                            }
+                        }
+                        if (row == 0) Spacer(Modifier.height(12.dp))
+                    }
+                }
             }
         }
     }

@@ -1,5 +1,7 @@
 package com.orbit.home.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -887,8 +889,13 @@ fun GridHome(
                                 .size(cellWidth, rowHeight)
                                 .padding(6.dp)
                                 .clip(RoundedCornerShape(if (folderOffered) 30.dp else 18.dp))
-                                .background(
-                                    OrbitColors.Accent.copy(alpha = if (folderOffered) 0.38f else 0.22f)
+                                // Neutral frosted white: it marks the spot without taking a colour of
+                                // its own, so it sits well on any wallpaper.
+                                .background(Color.White.copy(alpha = if (folderOffered) 0.30f else 0.18f))
+                                .border(
+                                    1.dp,
+                                    Color.White.copy(alpha = if (folderOffered) 0.55f else 0.32f),
+                                    RoundedCornerShape(if (folderOffered) 30.dp else 18.dp)
                                 )
                         )
                     }
@@ -942,8 +949,20 @@ fun GridHome(
                                 menuAt = null
                             }
                     )
+                    val placement = menuPlacement(
+                        wanted = menuWhere,
+                        menu = menuSize,
+                        bounds = menuBounds,
+                        cellWidth = cellWidthPx,
+                        cellHeight = cellHeightPx,
+                        gap = with(density) { MENU_GAP.toPx() },
+                        margin = with(density) { MENU_MARGIN.toPx() }
+                    )
                     AppMenu(
                         app = menuApp,
+                        fromTop = placement.below,
+                        originX = placement.originX,
+                        ready = menuSize != IntSize.Zero && menuBounds != IntSize.Zero,
                         onAppInfo = {
                             AppActions.openAppInfo(context, menuApp.packageName)
                             menuFor = null
@@ -964,14 +983,7 @@ fun GridHome(
                         },
                         modifier = Modifier
                             .onGloballyPositioned { menuSize = it.size }
-                            .offset {
-                                menuPosition(
-                                    wanted = menuWhere,
-                                    menu = menuSize,
-                                    bounds = menuBounds,
-                                    cellWidth = cellWidthPx
-                                )
-                            }
+                            .offset { placement.offset }
                     )
                 }
 
@@ -1216,8 +1228,9 @@ private val TARGET_HEIGHT = 48.dp
 private val TARGET_MARGIN = 12.dp
 private val TARGET_GAP = 10.dp
 
-/** How far above the app the menu sits. */
-private val MENU_LIFT = 8.dp
+/** The space between an app's cell and its menu, and the least the menu keeps from the screen's edges. */
+private val MENU_GAP = 4.dp
+private val MENU_MARGIN = 16.dp
 
 /** The two things an app can be carried to the top to have done to it. */
 internal enum class DropAction { REMOVE, UNINSTALL }
@@ -1261,21 +1274,37 @@ private val PAGE_DOTS_HEIGHT = 28.dp
  */
 private const val EDGE_DWELL_MS = 500L
 
+/** Where the app menu goes, and which way it grows out of the app. */
+private class MenuPlacement(val offset: IntOffset, val below: Boolean, val originX: Float)
+
 /**
  * Where the app menu goes, kept inside the space it is drawn in.
  *
- * The menu belongs beside the app it is about, so it starts where that app is. But an app in the last
- * column or the bottom row would put it half off the screen, and half a menu is a menu whose rows you
- * cannot press. It is nudged back inside instead - towards the middle, never off the other edge, and
- * never smaller than the space it has.
+ * The menu sits just below the cell of the app it is about, never on top of it, so the icon stays in
+ * view. If there is no room below (the bottom row) it goes above instead. Sideways it is centred on the
+ * app and then nudged back inside the screen, keeping [margin] clear of the edges.
  */
-private fun menuPosition(
+private fun menuPlacement(
     wanted: Offset,
     menu: IntSize,
     bounds: IntSize,
-    cellWidth: Float
-): IntOffset {
-    val x = (wanted.x - cellWidth / 2f).roundToInt().coerceIn(0, (bounds.width - menu.width).coerceAtLeast(0))
-    val y = wanted.y.roundToInt().coerceIn(0, (bounds.height - menu.height).coerceAtLeast(0))
-    return IntOffset(x, y)
+    cellWidth: Float,
+    cellHeight: Float,
+    gap: Float,
+    margin: Float
+): MenuPlacement {
+    val column = (wanted.x / cellWidth).toInt().coerceAtLeast(0)
+    val row = (wanted.y / cellHeight).toInt().coerceAtLeast(0)
+    val cellCentre = (column + 0.5f) * cellWidth
+    val cellTop = row * cellHeight
+    val cellBottom = cellTop + cellHeight
+
+    val maxX = (bounds.width - menu.width - margin).coerceAtLeast(margin)
+    val x = (cellCentre - menu.width / 2f).coerceIn(margin, maxX)
+
+    val fitsBelow = cellBottom + gap + menu.height <= bounds.height - margin
+    val y = if (fitsBelow) cellBottom + gap else (cellTop - gap - menu.height).coerceAtLeast(margin)
+
+    val originX = if (menu.width > 0) ((cellCentre - x) / menu.width).coerceIn(0.1f, 0.9f) else 0.5f
+    return MenuPlacement(IntOffset(x.roundToInt(), y.roundToInt()), fitsBelow, originX)
 }

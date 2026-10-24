@@ -1,5 +1,7 @@
 package com.orbit.home.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -651,10 +653,20 @@ internal fun AppCell(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelSmall
+            style = MaterialTheme.typography.labelSmall.copy(shadow = LABEL_SHADOW)
         )
     }
 }
+
+/**
+ * A whisper of shadow under app names, so white text stays readable over a bright wallpaper.
+ * Soft and low enough that on a dark one it simply is not noticed.
+ */
+internal val LABEL_SHADOW = Shadow(
+    color = Color.Black.copy(alpha = 0.35f),
+    offset = Offset(0f, 1.5f),
+    blurRadius = 6f
+)
 
 /**
  * The list/grid switch.

@@ -1,5 +1,14 @@
 package com.orbit.home.ui
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,11 +39,11 @@ import com.orbit.home.apps.InstalledApp
 import com.orbit.home.ui.theme.OrbitColors
 
 /**
- * What you can do to an app without opening it: see its settings, or take it off the phone.
+ * What you can do to an app without opening it: see its settings, take it off the home screen, or take
+ * it off the phone.
  *
- * Two rows, each an icon and its name, on one small surface. The app's own name is not repeated here
- * because the icon it belongs to is right underneath - and a menu that says the name of the thing you
- * are already holding is a menu that has not understood why it is there.
+ * It sits beside the app, never on it, and grows out of the edge that is nearest the app ([fromTop] says
+ * which). The destructive row is the only one with colour, so the eye lands on it last and knowingly.
  */
 @Composable
 internal fun AppMenu(
@@ -42,31 +51,62 @@ internal fun AppMenu(
     onAppInfo: () -> Unit,
     onRemove: () -> Unit,
     onUninstall: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** True when the menu is below the app, so it grows downwards from its top edge. */
+    fromTop: Boolean = true,
+    /** Where along the menu's width the app is, 0 to 1: the point the menu grows out of. */
+    originX: Float = 0.5f,
+    /** False until the menu has been measured and placed, so it never plays its entrance in the wrong spot. */
+    ready: Boolean = true
 ) {
+    val progress = rememberPopProgress(ready)
+    val shape = RoundedCornerShape(22.dp)
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
+            .popTransform(
+                progress = { if (ready) progress.value else 0f },
+                origin = TransformOrigin(originX, if (fromTop) 0f else 1f),
+                from = 0.8f,
+                rise = if (fromTop) (-6).dp else 6.dp
+            )
+            .width(220.dp)
+            .clip(shape)
             .background(OrbitColors.SurfaceHigh)
-            .padding(vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+            .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
+            .padding(vertical = 6.dp)
     ) {
         MenuRow(
             icon = Icons.Filled.Info,
             label = stringResource(R.string.app_info),
             onClick = onAppInfo
         )
+        MenuDivider()
         MenuRow(
             icon = Icons.Filled.Close,
             label = stringResource(R.string.app_remove),
             onClick = onRemove
         )
+        MenuDivider()
         MenuRow(
-            icon = Icons.Filled.Warning,
+            icon = Icons.Filled.Delete,
             label = stringResource(R.string.app_uninstall),
-            onClick = onUninstall
+            onClick = onUninstall,
+            tint = MENU_DESTRUCTIVE
         )
     }
+}
+
+private val MENU_DESTRUCTIVE = Color(0xFFFF6B66)
+
+@Composable
+private fun MenuDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(1.dp)
+            .background(Color.White.copy(alpha = 0.07f))
+    )
 }
 
 /** One line of the menu. */
@@ -74,25 +114,28 @@ internal fun AppMenu(
 private fun MenuRow(
     icon: ImageVector,
     label: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    tint: Color = OrbitColors.TextPrimary
 ) {
     Row(
         modifier = Modifier
+            .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 18.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = OrbitColors.TextPrimary,
+            tint = tint,
             modifier = Modifier.size(20.dp)
         )
         Text(
             text = label,
-            color = OrbitColors.TextPrimary,
-            style = MaterialTheme.typography.bodyMedium
+            color = tint,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
         )
     }
 }
@@ -112,7 +155,7 @@ internal fun DropTarget(
     destructive: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val armedColor = if (destructive) OrbitColors.Danger else OrbitColors.Accent
+    val armedColor = if (destructive) OrbitColors.Danger else Color(0xFF55555F)
     val armedText = stringResource(R.string.drop_target_armed, label)
     Row(
         modifier = modifier

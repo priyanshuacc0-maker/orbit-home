@@ -1,5 +1,6 @@
 package com.orbit.home.ui
 
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -90,17 +91,16 @@ private val KEY_GAP = 8.dp
 internal fun CalculatorDialog(onDismiss: () -> Unit) {
     var state by remember { mutableStateOf(CalcState()) }
     var closing by remember { mutableStateOf(false) }
-    val progress = remember { Animatable(0f) }
+    val progress = rememberPopProgress()
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
 
-    LaunchedEffect(Unit) { progress.animateTo(1f, tween(300, easing = FastOutSlowInEasing)) }
-
+    
     fun dismiss() {
         if (closing) return
         closing = true
         scope.launch {
-            progress.animateTo(0f, tween(180, easing = FastOutLinearInEasing))
+            progress.popOut()
             onDismiss()
         }
     }
@@ -121,7 +121,7 @@ internal fun CalculatorDialog(onDismiss: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f * progress.value))
+                // No dimming: the home screen stays as it is, and a tap on it just closes the card.
                 .pointerInput(Unit) { detectTapGestures { dismiss() } },
             contentAlignment = Alignment.Center
         ) {
@@ -130,16 +130,15 @@ internal fun CalculatorDialog(onDismiss: () -> Unit) {
                 modifier = Modifier
                     .padding(horizontal = 24.dp)
                     .widthIn(max = 400.dp)
-                    .graphicsLayer {
-                        val p = progress.value
-                        alpha = p
-                        scaleX = 0.88f + 0.12f * p
-                        scaleY = 0.88f + 0.12f * p
-                        translationY = (1f - p) * 48.dp.toPx()
-                    }
-                    .shadow(20.dp, shape, ambientColor = Color(0x66000000), spotColor = Color(0x66000000))
+                    .popTransform(
+                        progress = { progress.value },
+                        origin = TransformOrigin.Center,
+                        from = 0.9f,
+                        rise = 28.dp
+                    )
                     .clip(shape)
                     .background(CardColour)
+                    .border(1.dp, Color.White.copy(alpha = 0.6f), shape)
                     // Taps on the card are the card's: they must not fall through and close it.
                     .pointerInput(Unit) { detectTapGestures { } }
                     .padding(22.dp)

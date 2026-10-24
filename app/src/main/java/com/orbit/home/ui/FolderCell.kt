@@ -1,5 +1,7 @@
 package com.orbit.home.ui
 
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -108,7 +110,7 @@ internal fun FolderCell(
                 .clip(RoundedCornerShape(15.dp))
                 .background(OrbitColors.SurfaceHigh)
                 .then(
-                    if (armed) Modifier.border(2.dp, OrbitColors.Accent, RoundedCornerShape(15.dp))
+                    if (armed) Modifier.border(2.dp, Color.White.copy(alpha = 0.75f), RoundedCornerShape(15.dp))
                     else Modifier
                 )
                 .padding(5.dp),
@@ -130,7 +132,7 @@ internal fun FolderCell(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelSmall
+            style = MaterialTheme.typography.labelSmall.copy(shadow = LABEL_SHADOW)
         )
     }
 }
@@ -191,10 +193,19 @@ internal fun FolderPopup(
         if (trimmed != folder.name) onRename(trimmed)
     }
 
+    val progress = rememberPopProgress()
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
+
     fun close() {
+        if (closing) return
+        closing = true
         commitName()
         focus.clearFocus()
-        onDismiss()
+        scope.launch {
+            progress.popOut()
+            onDismiss()
+        }
     }
 
     BackHandler(enabled = !hidden) { close() }
@@ -209,7 +220,7 @@ internal fun FolderPopup(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
+                // No dimming behind the folder; the panel's own surface is what separates it.
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -219,9 +230,11 @@ internal fun FolderPopup(
         Column(
             modifier = Modifier
                 .padding(horizontal = 24.dp)
+                .popTransform(progress = { progress.value }, from = 0.86f, rise = 24.dp)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(28.dp))
                 .background(OrbitColors.SurfaceHigh)
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
                 // Taps on the panel's own gaps must not fall through to the scrim and close it.
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -235,7 +248,7 @@ internal fun FolderPopup(
                 onValueChange = { name = it.replace("\n", "").take(GridFolderCodec.MAX_NAME) },
                 singleLine = true,
                 textStyle = nameStyle,
-                cursorBrush = SolidColor(OrbitColors.Accent),
+                cursorBrush = SolidColor(Color.White),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Words,
                     imeAction = ImeAction.Done
