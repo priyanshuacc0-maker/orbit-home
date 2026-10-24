@@ -60,6 +60,9 @@ internal const val DRAWER_CLOSE_FLING_VELOCITY = 1200f
 /** How long before the dock will open the drawer again after doing so once. */
 private const val REARM_MILLIS = 500L
 
+/** How far above the dock an icon has to be carried before it is out of it and onto the home screen. */
+private val DRAG_OUT = 40.dp
+
 /**
  * The dock: up to five apps above the navigation bar.
  *
@@ -95,6 +98,15 @@ fun DockRow(
     onReorder: (List<String>) -> Unit = {},
     /** Take an app off the dock (not off the phone). */
     onRemove: (InstalledApp) -> Unit = {},
+    /**
+     * Carrying an icon up out of the dock onto the home screen. All positions are in root coordinates.
+     * [onDragOut] fires once as the icon leaves the dock; the home screen then draws it and takes the
+     * drop. Not offered (null) when there is no grid home to drop onto.
+     */
+    onDragOut: ((InstalledApp, Offset) -> Unit)? = null,
+    onDragOutMove: (Offset) -> Unit = {},
+    onDragOutEnd: (Offset) -> Unit = {},
+    onDragOutCancel: () -> Unit = {},
 ) {
     val density = LocalDensity.current
     val px = with(density) { DOCK_ICON_SIZE.roundToPx() }
@@ -114,6 +126,11 @@ fun DockRow(
     var carrying by remember { mutableStateOf(false) }
     var rowLeft by remember { mutableFloatStateOf(0f) }
     var rowWidth by remember { mutableFloatStateOf(0f) }
+    var rowTop by remember { mutableFloatStateOf(0f) }
+    // The app that has been carried up out of the dock. The home screen draws it now, so its slot here
+    // is left empty rather than showing a second copy.
+    var outId by remember { mutableStateOf<String?>(null) }
+    val dragOutPx = with(density) { DRAG_OUT.toPx() }
     val slotCentres = remember { HashMap<String, Offset>() }
 
     LaunchedEffect(armed) {
@@ -204,6 +221,7 @@ fun DockRow(
                 .padding(horizontal = 8.dp, vertical = 8.dp)
                 .onGloballyPositioned {
                     rowLeft = it.positionInRoot().x
+                    rowTop = it.positionInRoot().y
                     rowWidth = it.size.width.toFloat()
                 },
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -223,9 +241,22 @@ fun DockRow(
                             },
                             onMove = { at ->
                                 dragPos = at
+                                if (onDragOut != null && outId == null && at.y < rowTop - dragOutPx) {
+                                    // Carried clear of the dock: the home screen takes it from here.
+                                    outId = id
+                                    onDragOut(app, at)
+                                } else if (outId == id) {
+                                    if (at.y > rowTop) {
+                                        // Brought back down onto the dock: it stays a dock icon.
+                                        outId = null
+                                        onDragOutCancel()
+                                    } else {
+                                        onDragOutMove(at)
+                                    }
+                                }
                                 // Which slot the finger is over, from where the evenly spaced slots are.
                                 val n = order.size
-                                if (n > 1 && rowWidth > 0f) {
+                                if (outId == null && n > 1 && rowWidth > 0f) {
                                     val w = px.toFloat()
                                     val gap = (rowWidth - n * w) / (n + 1)
                                     val target = ((at.x - rowLeft - gap - w / 2f) / (gap + w))
@@ -240,16 +271,39 @@ fun DockRow(
                                     }
                                 }
                             },
-                            onEnd = {
+                            onEnd = { at ->
                                 dragId = null
-                                if (order != apps.map { it.id }) onReorder(order)
+                                if (outId == id) {
+                                    outId = null
+                                    onDragOutEnd(at)
+                                    order = apps.map { it.id }
+                                } else if (order != apps.map { it.id }) {
+                                    onReorder(order)
+                                }
                             },
                             onCancel = {
                                 dragId = null
+                                if (outId == id) {
+                                    outId = null
+                                    onDragOutCancel()
+                                }
                                 order = apps.map { it.id }
                             },
                             onHold = { menuFor = id },
-                            onPickUp = { up -> carrying = up }
+                            onPickUp = { up ->
+                                carrying = up
+                                if (!up) {
+                                    // However the gesture ended, nothing may be left lifted or half-handed over.
+                                    if (outId == id) {
+                                        outId = null
+                                        onDragOutCancel()
+                                    }
+                                    if (dragId == id) {
+                                        dragId = null
+                                        order = apps.map { it.id }
+                                    }
+                                }
+                            }
                         )
                     }
                     Box(
@@ -269,7 +323,7 @@ fun DockRow(
                                     }
                                     scaleX = 1.15f
                                     scaleY = 1.15f
-                                    alpha = 0.92f
+                                    alpha = if (outId == id) 0f else 0.92f
                                 }
                             }
                     ) {

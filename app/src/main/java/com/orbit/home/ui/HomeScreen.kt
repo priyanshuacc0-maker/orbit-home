@@ -346,6 +346,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
     var appDrag by remember { mutableStateOf<ExternalAppDrag?>(null) }
     // Where the carried app is. Kept apart from [appDrag] and read only at layout / inside the grid, so a
     // finger move no longer recomposes this whole screen (that was the stutter, unlike a drag within the grid).
+    // The dock app being carried out onto the home screen, if that is where the drag came from.
+    var dockCarried by remember { mutableStateOf<String?>(null) }
     var appDragPos by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val drawerShown: () -> Float = {
         when {
@@ -787,7 +789,16 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     onLaunch = viewModel::launch,
                     externalDrag = appDrag,
                     externalPosition = { appDragPos },
-                    onExternalDragDone = { appDrag = null },
+                    onExternalDragDone = { landed ->
+                        val fromDock = dockCarried
+                        appDrag = null
+                        dockCarried = null
+                        // An app carried out of the dock has moved to the home screen only if it landed
+                        // on it. Dropped anywhere else it simply stays on the dock.
+                        if (landed && fromDock != null) {
+                            viewModel.saveDockOrder(state.dockApps.map { it.id }.filter { it != fromDock })
+                        }
+                    },
                     reducedMotion = state.reducedMotion,
                     modifier = Modifier
                         .weight(1f)
@@ -1003,6 +1014,22 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     onDrawerRelease = { open, velocityY -> releaseDrawer(open, velocityY) },
                     pullDistancePx = drawerTravelPx,
                     onReorder = viewModel::saveDockOrder,
+                    onDragOut = if (state.homeGrid && state.homeInitialized) {
+                        { app, at ->
+                            appDragPos = at
+                            dockCarried = app.id
+                            appDrag = ExternalAppDrag(app.id, at.x, at.y)
+                        }
+                    } else null,
+                    onDragOutMove = { at -> appDragPos = at },
+                    onDragOutEnd = { at ->
+                        appDragPos = at
+                        appDrag = appDrag?.copy(x = at.x, y = at.y, released = true)
+                    },
+                    onDragOutCancel = {
+                        appDrag = null
+                        dockCarried = null
+                    },
                     onRemove = { app ->
                         viewModel.saveDockOrder(state.dockApps.map { it.id }.filter { it != app.id })
                     },

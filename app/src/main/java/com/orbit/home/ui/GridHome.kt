@@ -110,7 +110,8 @@ fun GridHome(
     externalDrag: ExternalAppDrag? = null,
     /** The carried app's live position, read here so only the grid recomposes as the finger moves. */
     externalPosition: (() -> Offset)? = null,
-    onExternalDragDone: () -> Unit = {},
+    /** Called when a carried app has been let go; [landed] is true if it was put into a cell. */
+    onExternalDragDone: (landed: Boolean) -> Unit = {},
     /** With motion off, apps still get out of the way - they just arrive in one frame. */
     reducedMotion: Boolean = false,
     modifier: Modifier = Modifier
@@ -531,7 +532,7 @@ fun GridHome(
                 folderDrag = null
                 openFolderId = null
             } else {
-                onExternalDragDone()
+                onExternalDragDone(to != null && !backWhereItWas)
             }
         }
 
