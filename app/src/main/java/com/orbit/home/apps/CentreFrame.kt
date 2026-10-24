@@ -73,3 +73,15 @@ fun scaledTo(bitmap: Bitmap, maxPx: Int): Bitmap {
         )
     }.getOrDefault(bitmap)
 }
+
+/**
+ * [width] x [height] scaled down, keeping its shape, so the longer side is no more than [maxPx].
+ * Never scaled up, and never below one pixel on a side.
+ */
+fun fitWithin(width: Int, height: Int, maxPx: Int): Pair<Int, Int> {
+    if (width <= 0 || height <= 0 || maxPx <= 0) return width.coerceAtLeast(1) to height.coerceAtLeast(1)
+    val widest = maxOf(width, height)
+    if (widest <= maxPx) return width to height
+    val ratio = maxPx.toFloat() / widest
+    return (width * ratio).roundToInt().coerceAtLeast(1) to (height * ratio).roundToInt().coerceAtLeast(1)
+}

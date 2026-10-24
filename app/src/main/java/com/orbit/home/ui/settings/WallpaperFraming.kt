@@ -2,10 +2,10 @@ package com.orbit.home.ui.settings
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Build
 import android.view.WindowManager
 import android.net.Uri
+import com.orbit.home.apps.decodeUpright
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -72,37 +72,33 @@ internal fun screenFrameSize(context: Context): Pair<Int, Int> {
 /**
  * The picture, cut to the shape and size the wallpaper is asked for.
  *
- * This is the whole of what was missing. The picture used to be handed to the system as it arrived,
- * with no crop hint and nothing said about its size, so a photograph whose proportions did not match
- * the screen came out short of the edges — and the home screen, which draws the wallpaper through its
- * own window with a transparent background, showed whatever was underneath in the gap.
- *
  * The size asked for is the screen's own, so the picture's centre is the screen's centre.
  */
-internal suspend fun frameForWallpaper(context: Context, uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+internal suspend fun frameForWallpaper(context: Context, uri: Uri): Bitmap? {
+    val (frameWidth, frameHeight) = screenFrameSize(context)
+    return frameImage(context, uri, frameWidth, frameHeight)
+}
+
+/**
+ * The picture, the right way up and cut to exactly [frameWidth] x [frameHeight].
+ *
+ * The one pipeline behind the phone wallpaper, the hidden wallpaper and both previews. The previews
+ * call it with a smaller frame of the same shape, so what is shown is the same crop of the same
+ * upright picture that is later set — not a second, approximate rendering of it.
+ */
+internal suspend fun frameImage(
+    context: Context,
+    uri: Uri,
+    frameWidth: Int,
+    frameHeight: Int
+): Bitmap? = withContext(Dispatchers.IO) {
     runCatching {
-        val (frameWidth, frameHeight) = screenFrameSize(context)
+        if (frameWidth <= 0 || frameHeight <= 0) return@runCatching null
 
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
-        }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
-
-        // Never decoded larger than the wallpaper can use: a modern camera's photograph at full size
-        // is many times this, and decoding it whole is how setting a wallpaper runs out of memory.
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= frameWidth && bounds.outHeight / (sample * 2) >= frameHeight) {
-            sample *= 2
-        }
-
-        val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(
-                stream,
-                null,
-                BitmapFactory.Options().apply { inSampleSize = sample }
-            )
-        } ?: return@runCatching null
+        // Never decoded larger than the frame can use: a modern camera's photograph at full size is
+        // many times this, and decoding it whole is how setting a wallpaper runs out of memory.
+        val decoded = decodeUpright(context, uri) { w, h -> w >= frameWidth && h >= frameHeight }
+            ?: return@runCatching null
 
         val crop = coverCrop(decoded.width, decoded.height, frameWidth, frameHeight)
         val cut = Bitmap.createBitmap(decoded, crop.left, crop.top, crop.width, crop.height)
@@ -113,4 +109,17 @@ internal suspend fun frameForWallpaper(context: Context, uri: Uri): Bitmap? = wi
         if (framed != cut) cut.recycle()
         framed
     }.getOrNull()
+}
+
+/**
+ * The size to render a preview of a [frameWidth] x [frameHeight] wallpaper at: the same shape, with
+ * the long side no more than [maxLongSide]. Never larger than the frame itself.
+ */
+internal fun previewFrameSize(frameWidth: Int, frameHeight: Int, maxLongSide: Int = 1280): Pair<Int, Int> {
+    if (frameWidth <= 0 || frameHeight <= 0) return 1 to 1
+    val longSide = maxOf(frameWidth, frameHeight)
+    if (longSide <= maxLongSide) return frameWidth to frameHeight
+    val ratio = maxLongSide.toFloat() / longSide
+    return (frameWidth * ratio).roundToInt().coerceAtLeast(1) to
+        (frameHeight * ratio).roundToInt().coerceAtLeast(1)
 }

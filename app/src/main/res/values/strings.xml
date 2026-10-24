@@ -81,6 +81,12 @@
     <string name="wallpaper_hidden_sub">Shown when you triple-tap the home screen</string>
     <string name="wallpaper_hidden_failed">That picture could not be used</string>
     <string name="wallpaper_hidden_none">No hidden wallpaper yet</string>
+    <string name="wallpaper_hidden_saved">Hidden wallpaper saved</string>
+    <string name="wallpaper_preview_main">Phone wallpaper \u2014 exactly as it will be set</string>
+    <string name="wallpaper_preview_hidden">Hidden wallpaper \u2014 exactly as it will be shown</string>
+    <string name="wallpaper_showing_phone">Showing: your phone wallpaper</string>
+    <string name="wallpaper_showing_hidden">Showing: the hidden wallpaper</string>
+    <string name="wallpaper_switch">Switch</string>
     <string name="centre_video_too_big">That video is too large to use</string>
     <string name="centre_video_failed">That video could not be read</string>
     <string name="centre_adjust_done">Done</string>

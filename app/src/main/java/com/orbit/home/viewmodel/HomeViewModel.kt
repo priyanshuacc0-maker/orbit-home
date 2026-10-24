@@ -117,6 +117,8 @@ data class HomeUiState(
     val canDrawOverlays: Boolean = true,
     /** Whether the hidden wallpaper is the one showing. */
     val hiddenWallpaperShowing: Boolean = false,
+    /** The edge the floating wheel is docked to, as stored; decides which half of its centre shows. */
+    val shortcutEdge: Int = com.orbit.home.preferences.HomeSettings.DEFAULT_SHORTCUT_EDGE,
     val clockColour: Int = 3,
     /** Whether the calculator is in its dark theme. */
     val calcDark: Boolean = true,
@@ -319,6 +321,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         shortcutOffsetY = s.shortcutOffsetY,
                         settingsLoaded = true,
                         hiddenWallpaperShowing = s.hiddenWallpaperShowing,
+                        shortcutEdge = s.shortcutEdge,
             clockColour = s.clockColour,
             calcDark = s.calcDark,
             clockX = s.clockX,
@@ -814,10 +817,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { preferences.setClockFrame(x, y, textScale, widthScale) }
     }
 
-    /** Sets the hidden wallpaper from a picture the user picked, and switches to it. */
-    fun setHiddenWallpaper(uri: Uri) {
+    /**
+     * Sets the hidden wallpaper from a picture the user picked. [onResult] is told whether it was
+     * kept, so the page can say so only once it is true.
+     */
+    fun setHiddenWallpaper(uri: Uri, onResult: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
-            if (hiddenWallpaperStore.save(uri)) {
+            val saved = hiddenWallpaperStore.save(uri)
+            if (saved) {
                 // Setting it does not switch to it. The two are switched by the triple tap, and a
                 // picture that took over the home screen the moment it was chosen would be one that
                 // decided something the user had not asked for.
@@ -825,6 +832,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 reportCentreProblem(R.string.wallpaper_hidden_failed)
             }
+            // After the refresh, so the page never says "saved" before the new picture can be shown.
+            onResult(saved)
         }
     }
 

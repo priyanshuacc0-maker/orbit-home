@@ -182,12 +182,16 @@ class CentreImageStore(private val context: Context) {
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(context, uri)
-                val frame = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                // The size is worked out here, keeping the video's own shape, rather than handing the
+                // retriever a square to fill: a frame stretched to a square would be framed on a
+                // picture that is not the one the player draws, and the framing would come out off.
+                val shown = displayedVideoSize(retriever)?.let { (w, h) -> fitWithin(w, h, maxPx) }
+                val frame = if (shown != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                     retriever.getScaledFrameAtTime(
                         0L,
                         MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                        maxPx,
-                        maxPx
+                        shown.first,
+                        shown.second
                     )
                 } else {
                     retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
@@ -198,6 +202,19 @@ class CentreImageStore(private val context: Context) {
                 runCatching { retriever.release() }
             }
         }.getOrNull()
+    }
+
+    /** The video's width and height as it is shown, after any rotation recorded in the file. */
+    private fun displayedVideoSize(retriever: MediaMetadataRetriever): Pair<Int, Int>? {
+        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            ?.toIntOrNull() ?: return null
+        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            ?.toIntOrNull() ?: return null
+        val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            ?.toIntOrNull() ?: 0
+        if (width <= 0 || height <= 0) return null
+        val turned = ((rotation % 180) + 180) % 180 == 90
+        return if (turned) height to width else width to height
     }
 
     /** The stored video for [target], or null if there is none. The newest one is the one in use. */
@@ -356,22 +373,8 @@ class CentreImageStore(private val context: Context) {
      * picture is many times what a centre can show, and decoding it whole is how a launcher runs out
      * of memory.
      */
-    private fun decode(uri: Uri, maxPx: Int): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
-        }
-        val widest = maxOf(bounds.outWidth, bounds.outHeight)
-        if (widest <= 0) return null
-
-        var sample = 1
-        while (widest / (sample * 2) >= maxPx) sample *= 2
-
-        val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        return context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, options)
-        }
-    }
+    private fun decode(uri: Uri, maxPx: Int): Bitmap? =
+        decodeUpright(context, uri) { w, h -> maxOf(w, h) >= maxPx }
 
     private companion object {
         const val DIRECTORY = "centres"

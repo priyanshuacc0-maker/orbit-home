@@ -42,22 +42,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.orbit.home.R
 import com.orbit.home.ui.theme.OrbitColors
 import kotlin.math.roundToInt
 import com.orbit.home.apps.renderFramed
+import com.orbit.home.overlay.DockEdge
 import com.orbit.home.preferences.CentreTransform
 
 /** How much bigger than the smallest covering size a picture may be zoomed. */
@@ -88,10 +93,11 @@ private val GUIDE_COLOR = Color.White.copy(alpha = 0.9f)
  * Cancel leaves everything as it was. The middle button turns the picture a quarter at a time,
  * because a picture framed the wrong way up cannot be fixed by moving it. Done keeps it.
  *
- * [edgeMounted] is for a centre that lives on the screen edge. The floating wheel's centre is half
+ * [dockEdge] is for a centre that lives on a screen edge. The floating wheel's centre is half
  * outside the display, so only half of it is ever seen — and a guide that promised a whole circle
  * would be promising something the screen cannot show. There the guide is a half circle, on the
- * side that survives.
+ * side that survives for the edge the wheel is docked to, and everything that will not be seen is
+ * dimmed, so the picture can be framed by what is left bright.
  */
 @Composable
 fun CentreAdjustScreen(
@@ -106,7 +112,7 @@ fun CentreAdjustScreen(
      */
     onDone: (ImageBitmap, CentreTransform) -> Unit,
     modifier: Modifier = Modifier,
-    edgeMounted: Boolean = false
+    dockEdge: DockEdge? = null
 ) {
     var scale by remember { mutableFloatStateOf(1f) }
     var quarterTurns by remember { mutableIntStateOf(0) }
@@ -147,7 +153,9 @@ fun CentreAdjustScreen(
         offsetX = 0f
         offsetY = 0f
     }
-    LaunchedEffect(coverScale) { reset() }
+    // Also on every turn: a quarter turn of a square picture leaves the cover scale as it was, and
+    // the old offset would then be applied to a picture that is now facing another way.
+    LaunchedEffect(coverScale, quarterTurns) { reset() }
 
     val transform = CropTransform(scale, offsetX, offsetY)
 
@@ -171,41 +179,66 @@ fun CentreAdjustScreen(
                     .size(side)
                     .onSizeChanged { framePx = it.width.toFloat() }
                     .pointerInput(working, framePx, coverScale, floorScale) {
-                        detectTransformGestures { _, pan, zoom, _ ->
+                        detectTransformGestures { centroid, pan, zoom, _ ->
                             val next = CropMath.clampScale(
                                 scale * zoom,
                                 floorScale,
                                 coverScale * MAX_ZOOM
                             )
+                            // The ratio actually applied, after the limits: using the requested zoom
+                            // would let the picture drift while it is held at the largest or smallest.
+                            val ratio = if (scale > 0f) next / scale else 1f
+                            // Zoomed about the fingers and moved by exactly what they moved, to
+                            // wherever it is taken. There is no limit: where the picture sits inside
+                            // the frame is the user's business, and the frame is only a window onto it.
+                            val moved = CropMath.zoomAbout(
+                                offsetX, offsetY,
+                                centroid.x - size.width / 2f, centroid.y - size.height / 2f,
+                                ratio, pan.x, pan.y
+                            )
                             scale = next
-                            // Moved by exactly what the finger moved, to wherever it is taken.
-                            // There is no limit: where the picture sits inside the frame is the
-                            // user's business, and the frame is only a window onto it.
-                            offsetX += pan.x
-                            offsetY += pan.y
+                            offsetX = moved.first
+                            offsetY = moved.second
                         }
                     }
             ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
+                // Clipped to the frame: what is drawn outside it is not in the result, and a preview
+                // that shows more than will be kept is not a preview of what will be kept.
+                Canvas(modifier = Modifier.fillMaxSize().clipToBounds()) {
                     val frame = size.width
                     if (frame <= 0f) return@Canvas
 
-                    val drawnW = working.width * scale
-                    val drawnH = working.height * scale
-                    drawImage(
-                        image = working,
-                        srcOffset = IntOffset.Zero,
-                        srcSize = IntSize(working.width, working.height),
-                        dstOffset = IntOffset(
-                            (frame / 2f + offsetX - drawnW / 2f).roundToInt(),
-                            (frame / 2f + offsetY - drawnH / 2f).roundToInt()
-                        ),
-                        dstSize = IntSize(
-                            drawnW.roundToInt().coerceAtLeast(1),
-                            drawnH.roundToInt().coerceAtLeast(1)
-                        ),
-                        filterQuality = FilterQuality.Medium
-                    )
+                    // The same arithmetic renderFramed uses: scale about the picture's corner, then
+                    // translate. Rounding the destination to whole pixels, as this used to, put the
+                    // preview up to half a pixel away from the saved result at every edge.
+                    withTransform({
+                        translate(
+                            left = frame / 2f + offsetX - working.width * scale / 2f,
+                            top = frame / 2f + offsetY - working.height * scale / 2f
+                        )
+                        scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
+                    }) {
+                        drawImage(
+                            image = working,
+                            topLeft = Offset.Zero,
+                            filterQuality = FilterQuality.Medium
+                        )
+                    }
+
+                    // Everything the centre will not show is dimmed: the corners outside the circle
+                    // and, on a wheel docked to an edge, the half beyond the edge.
+                    val whole = Rect(0f, 0f, frame, frame)
+                    val scrim = Path().apply {
+                        fillType = PathFillType.EvenOdd
+                        addRect(whole)
+                        if (dockEdge != null) {
+                            addArc(whole, visibleArcStartAngle(dockEdge), 180f)
+                            close()
+                        } else {
+                            addOval(whole)
+                        }
+                    }
+                    drawPath(scrim, Color.Black.copy(alpha = 0.55f), style = Fill)
 
                     // Thirds, for composing by eye.
                     val hairline = 1.dp.toPx()
@@ -217,14 +250,12 @@ fun CentreAdjustScreen(
 
                     // What the centre will actually show, and the frame it is cropped from.
                     val guide = Stroke(width = 1.5.dp.toPx())
-                    if (edgeMounted) {
-                        // A centre on the screen edge: only the half facing into the screen is ever
-                        // seen, so the guide is that half. Drawn from the bottom round through the
-                        // left to the top, which is the half that stays on screen for a wheel
-                        // mounted on the right edge.
+                    if (dockEdge != null) {
+                        // A centre on a screen edge: only the half facing into the screen is ever
+                        // seen, and which half depends on the edge the wheel is docked to.
                         drawArc(
                             color = GUIDE_COLOR,
-                            startAngle = 90f,
+                            startAngle = visibleArcStartAngle(dockEdge),
                             sweepAngle = 180f,
                             useCenter = false,
                             topLeft = Offset.Zero,
@@ -232,12 +263,21 @@ fun CentreAdjustScreen(
                             style = guide
                         )
                         // The edge itself, so the half reads as cut rather than as a shape.
-                        drawLine(
-                            color = GUIDE_COLOR,
-                            start = Offset(frame / 2f, 0f),
-                            end = Offset(frame / 2f, frame),
-                            strokeWidth = 1.5.dp.toPx()
-                        )
+                        if (dockEdge.isSide) {
+                            drawLine(
+                                color = GUIDE_COLOR,
+                                start = Offset(frame / 2f, 0f),
+                                end = Offset(frame / 2f, frame),
+                                strokeWidth = 1.5.dp.toPx()
+                            )
+                        } else {
+                            drawLine(
+                                color = GUIDE_COLOR,
+                                start = Offset(0f, frame / 2f),
+                                end = Offset(frame, frame / 2f),
+                                strokeWidth = 1.5.dp.toPx()
+                            )
+                        }
                     } else {
                         drawCircle(
                             color = GUIDE_COLOR,

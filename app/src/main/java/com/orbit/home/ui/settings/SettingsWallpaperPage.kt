@@ -5,7 +5,6 @@ import android.app.WallpaperManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,22 +28,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -68,10 +67,21 @@ private sealed interface WallpaperStatus {
     data object Working : WallpaperStatus
     data object Applied : WallpaperStatus
     data object Cancelled : WallpaperStatus
+    data object HiddenSaved : WallpaperStatus
     data class Failed(val detail: String) : WallpaperStatus
+}
 
-    /** A device with no usable crop activity, so the direct set is offered instead. */
-
+/**
+ * The preview card's state.
+ *
+ * Three states rather than "an image or nothing": a picture that is still opening, one that could
+ * not be opened, and one that is ready are different things to tell somebody, and the old card drew
+ * the same empty gradient for all three — which made a failed picture look like a slow one.
+ */
+private sealed interface PreviewState {
+    data object Loading : PreviewState
+    data object Failed : PreviewState
+    data class Ready(val image: ImageBitmap) : PreviewState
 }
 
 /** The shape of the preview card and of the two big buttons. */
@@ -105,7 +115,7 @@ fun SettingsWallpaperPage(
     hiddenShowing: Boolean,
     /** The hidden wallpaper, if one has been set. */
     hiddenWallpaper: ImageBitmap?,
-    onSetHidden: (Uri) -> Unit,
+    onSetHidden: (Uri, (Boolean) -> Unit) -> Unit,
     onToggleHidden: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -114,35 +124,24 @@ fun SettingsWallpaperPage(
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<WallpaperStatus>(WallpaperStatus.Idle) }
 
-    /** The chosen picture, held until Apply. Null means nothing is pending. */
-    var pending by remember { mutableStateOf<Uri?>(null) }
-    var pendingImage by remember { mutableStateOf<ImageBitmap?>(null) }
+    /**
+     * The chosen picture, held until Apply. Null means nothing is pending.
+     *
+     * Saved with the instance state: the pickers are other apps' screens, and the system may stop
+     * this process while one is open. A choice that vanished on the way back would look like the
+     * picker having done nothing.
+     */
+    var pending by rememberSaveable { mutableStateOf<Uri?>(null) }
 
     /**
      * The picture chosen for the hidden wallpaper, held until it is set.
      *
      * Separate from [pending] because the two wallpapers are two different jobs: one goes through
-     * the system's crop-and-set screen and the other is this app's own background, and a page that
+     * the system's wallpaper manager and the other is this app's own background, and a page that
      * mixed them would be a page that could send a picture to the wrong one.
      */
-    var hiddenPending by remember { mutableStateOf<Uri?>(null) }
-    var hiddenPendingImage by remember { mutableStateOf<ImageBitmap?>(null) }
+    var hiddenPending by rememberSaveable { mutableStateOf<Uri?>(null) }
 
-
-    // The chosen picture, decoded off the main thread so a large photograph cannot stall the
-    // page while it is being opened. Without this the preview has nothing to draw and falls
-    // back to its gradient, which looks like the page having lost the picture.
-    LaunchedEffect(pending) {
-        pendingImage = pending?.let { readImage(context, it) }
-    }
-
-    LaunchedEffect(hiddenPending) {
-        hiddenPendingImage = hiddenPending?.let { readImage(context, it) }
-    }
-
-    // What was pending is now the phone's wallpaper, so there is nothing left to hold.
-    // The external crop-and-set workflow. Its result is the only thing treated as success.
-    
     // The photo picker: the platform's own, so no permission and no access to anything the
     // user did not choose.
     val pickPhoto = rememberLauncherForActivityResult(
@@ -189,13 +188,29 @@ fun SettingsWallpaperPage(
 
     val busy = status == WallpaperStatus.Working
     val chosen = pending
-
     // The shape of this phone, so the picture is shown as the phone will show it rather than
-    // cropped into some other rectangle.
-    // The same frame the picture is cut to when applied, so the preview is what will be set.
-    val screenRatio = remember(LocalConfiguration.current) {
-        val (w, h) = screenFrameSize(context)
-        if (w > 0 && h > 0) w.toFloat() / h.toFloat() else DEFAULT_SCREEN_RATIO
+    // cropped into some other rectangle. The same frame the picture is cut to when it is set.
+    val configuration = LocalConfiguration.current
+    val frame = remember(configuration) { screenFrameSize(context) }
+    val screenRatio = if (frame.first > 0 && frame.second > 0) {
+        frame.first.toFloat() / frame.second.toFloat()
+    } else {
+        DEFAULT_SCREEN_RATIO
+    }
+    val previewSize = remember(frame) { previewFrameSize(frame.first, frame.second) }
+
+    // Whichever picture is waiting, and the preview of it.
+    //
+    // The preview is not a second rendering of the picture: it is the very same upright, centred,
+    // cover-cropped frame that is set, only drawn smaller. So what is shown is what will be applied,
+    // including a photograph's rotation, and a picture that cannot be opened says so here rather
+    // than being found out when Apply fails.
+    val waiting: Uri? = pending ?: hiddenPending
+    val preview by produceState<PreviewState>(PreviewState.Loading, waiting, previewSize) {
+        value = PreviewState.Loading
+        val uri = waiting ?: return@produceState
+        val framed = frameImage(context, uri, previewSize.first, previewSize.second)
+        value = if (framed != null) PreviewState.Ready(framed.asImageBitmap()) else PreviewState.Failed
     }
 
     Column(
@@ -215,11 +230,21 @@ fun SettingsWallpaperPage(
             //
             // The two are separate jobs but the same step, so the same card serves both — at the
             // phone's shape and the largest that fits, which is what makes it a picture of what the
-            // home screen will look like rather than a picture of a picture.
+            // home screen will look like rather than a picture of a picture. It is named, so there
+            // is never any doubt which wallpaper Apply is about to change.
             val hiddenChosen = hiddenPending
-            val pendingPicture = if (chosen != null) pendingImage else hiddenPendingImage
+            val ready = preview is PreviewState.Ready
 
             if (chosen != null || hiddenChosen != null) {
+                Text(
+                    text = stringResource(
+                        if (chosen != null) R.string.wallpaper_preview_main
+                        else R.string.wallpaper_preview_hidden
+                    ),
+                    color = OrbitColors.TextSecondary,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
+                )
                 BoxWithConstraints(
                     modifier = Modifier
                         .weight(1f)
@@ -228,7 +253,7 @@ fun SettingsWallpaperPage(
                 ) {
                     val tallest = minOf(maxHeight, maxWidth / screenRatio)
                     WallpaperPreview(
-                        image = pendingPicture,
+                        state = preview,
                         modifier = Modifier
                             .height(tallest)
                             .width(tallest * screenRatio)
@@ -256,7 +281,9 @@ fun SettingsWallpaperPage(
                     WallpaperButton(
                         text = stringResource(R.string.wallpaper_apply),
                         filled = true,
-                        enabled = !busy,
+                        // Only once the preview is showing the picture: Apply on a picture that
+                        // has not opened, or cannot, would be pressing a button for nothing.
+                        enabled = !busy && ready,
                         onClick = {
                             if (chosen != null) {
                                 // Framed and set here, by this app.
@@ -287,11 +314,20 @@ fun SettingsWallpaperPage(
                                     if (status == WallpaperStatus.Applied) pending = null
                                 }
                             } else if (hiddenChosen != null) {
-                                // The hidden one is this app's own background, so it is simply
-                                // kept — the same picture, the same preview, one step less.
-                                status = WallpaperStatus.Idle
-                                hiddenPending = null
-                                onSetHidden(hiddenChosen)
+                                // The hidden one is this app's own background, so it is kept here —
+                                // framed exactly as the preview showed it. Nothing is claimed until
+                                // the copy has actually been written.
+                                status = WallpaperStatus.Working
+                                onSetHidden(hiddenChosen) { saved ->
+                                    if (saved) {
+                                        hiddenPending = null
+                                        status = WallpaperStatus.HiddenSaved
+                                    } else {
+                                        status = WallpaperStatus.Failed(
+                                            context.getString(R.string.wallpaper_hidden_failed)
+                                        )
+                                    }
+                                }
                             }
                         },
                         modifier = Modifier.weight(1f)
@@ -337,14 +373,11 @@ fun SettingsWallpaperPage(
 
                 // The hidden wallpaper. Tapping it picks a picture, and from there it is the same
                 // preview and the same two buttons as the phone's — the difference is only where
-                // the picture ends up.
-                WallpaperSourceCard(
-                    painter = R.drawable.ic_set_wallpaper,
-                    title = stringResource(R.string.wallpaper_hidden),
-                    subtitle = stringResource(
-                        if (hiddenWallpaper == null) R.string.wallpaper_hidden_none
-                        else R.string.wallpaper_hidden_sub
-                    ),
+                // the picture ends up. What is set now is shown beside the name, at the phone's
+                // own shape, so the box is a preview of the thing it controls.
+                HiddenWallpaperCard(
+                    current = hiddenWallpaper,
+                    screenRatio = screenRatio,
                     enabled = !busy,
                     onClick = {
                         status = WallpaperStatus.Idle
@@ -354,6 +387,34 @@ fun SettingsWallpaperPage(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Which one is showing, and the way to change it that is not a gesture. A triple tap
+                // is something only some people can do, so it is never the only way to a feature.
+                if (hiddenWallpaper != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (hiddenShowing) R.string.wallpaper_showing_hidden
+                                else R.string.wallpaper_showing_phone
+                            ),
+                            color = OrbitColors.TextSecondary,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        WallpaperButton(
+                            text = stringResource(R.string.wallpaper_switch),
+                            filled = false,
+                            enabled = !busy,
+                            onClick = onToggleHidden,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
 
             WallpaperStatusLine(status)
@@ -369,9 +430,13 @@ fun SettingsWallpaperPage(
  * Nothing is drawn over it. A chip naming the wallpaper and a row of grey squares standing in for
  * the dock both sat on top of the picture, and both got in the way of the one thing this card is
  * for, which is seeing the picture.
+ *
+ * The picture arrives already cut to the phone's shape, so it is drawn to fill the card exactly —
+ * stretched by nothing, since card and picture have the same proportions, and cropped by nothing,
+ * since the crop has already happened.
  */
 @Composable
-private fun WallpaperPreview(image: ImageBitmap?, modifier: Modifier = Modifier) {
+private fun WallpaperPreview(state: PreviewState, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(CARD_RADIUS)
     Box(
         modifier = modifier
@@ -383,14 +448,84 @@ private fun WallpaperPreview(image: ImageBitmap?, modifier: Modifier = Modifier)
             )
             // The outline is always here: this card only ever shows a picture that has not
             // been applied yet.
-            .border(2.dp, OrbitColors.Accent, shape)
+            .border(2.dp, OrbitColors.Accent, shape),
+        contentAlignment = Alignment.Center
     ) {
-        if (image != null) {
+        when (state) {
+            is PreviewState.Ready -> Image(
+                bitmap = state.image,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier.fillMaxSize()
+            )
+            PreviewState.Loading -> CircularProgressIndicator(color = OrbitColors.Accent)
+            PreviewState.Failed -> Text(
+                text = stringResource(R.string.wallpaper_unreadable),
+                color = OrbitColors.TextPrimary,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(24.dp)
+            )
+        }
+    }
+}
+
+/**
+ * The hidden wallpaper's box: its name, and what is set now at the phone's own shape.
+ *
+ * With nothing set the box says so and shows no thumbnail, rather than drawing an empty frame that
+ * looks like a picture that failed to load.
+ */
+@Composable
+private fun HiddenWallpaperCard(
+    current: ImageBitmap?,
+    screenRatio: Float,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(22.dp)
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(OrbitColors.Surface)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        if (current != null) {
             Image(
-                bitmap = image,
+                bitmap = current,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .height(96.dp)
+                    .aspectRatio(screenRatio)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, OrbitColors.Guide, RoundedCornerShape(12.dp))
+            )
+        } else {
+            Image(
+                painter = painterResource(R.drawable.ic_set_wallpaper),
+                contentDescription = null,
+                modifier = Modifier.size(44.dp)
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.wallpaper_hidden),
+                color = OrbitColors.TextPrimary,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stringResource(
+                    if (current == null) R.string.wallpaper_hidden_none
+                    else R.string.wallpaper_hidden_sub
+                ),
+                color = OrbitColors.TextSecondary,
+                style = MaterialTheme.typography.bodySmall
             )
         }
     }
@@ -519,35 +654,6 @@ private suspend fun setDirectly(context: Context, uri: Uri): WallpaperStatus = w
     }
 }
 
-/**
- * A picture the user chose, decoded off the main thread and downscaled on the way in.
- *
- * The bounds are read first so a very large photograph is never fully decoded: a modern phone
- * camera's picture at full size is many times what a preview card can show, and decoding it
- * whole is how a settings page runs out of memory.
- */
-private suspend fun readImage(context: Context, uri: Uri): ImageBitmap? = withContext(Dispatchers.IO) {
-    runCatching {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
-        }
-        val widest = maxOf(bounds.outWidth, bounds.outHeight)
-        if (widest <= 0) return@runCatching null
-
-        var sample = 1
-        while (widest / (sample * 2) >= PREVIEW_PX) sample *= 2
-
-        val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, options)?.asImageBitmap()
-        }
-    }.getOrNull()
-}
-
-/** Roughly how wide the preview is drawn, in pixels, at the largest this page needs. */
-private const val PREVIEW_PX = 1080
-
 /** Only used if the configuration will not report a size, which should not happen. */
 private const val DEFAULT_SCREEN_RATIO = 0.5f
 
@@ -558,6 +664,7 @@ private fun WallpaperStatusLine(status: WallpaperStatus) {
         WallpaperStatus.Idle -> null
         WallpaperStatus.Working -> stringResource(R.string.wallpaper_working)
         WallpaperStatus.Applied -> stringResource(R.string.wallpaper_applied)
+        WallpaperStatus.HiddenSaved -> stringResource(R.string.wallpaper_hidden_saved)
         WallpaperStatus.Cancelled -> stringResource(R.string.wallpaper_cancelled)
         is WallpaperStatus.Failed ->
             stringResource(R.string.wallpaper_failed) + if (status.detail.isNotBlank()) " (${status.detail})" else ""
@@ -565,7 +672,11 @@ private fun WallpaperStatusLine(status: WallpaperStatus) {
 
     Text(
         text = message,
-        color = if (status == WallpaperStatus.Applied) OrbitColors.Accent else OrbitColors.TextSecondary,
+        color = if (status == WallpaperStatus.Applied || status == WallpaperStatus.HiddenSaved) {
+            OrbitColors.Accent
+        } else {
+            OrbitColors.TextSecondary
+        },
         style = MaterialTheme.typography.bodySmall,
         textAlign = TextAlign.Center,
         modifier = Modifier

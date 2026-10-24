@@ -302,3 +302,33 @@ Wheel ordering:
 1. Launch an app from the wheel, drawer, grid or dock, return home: it is now first on the wheel.
 2. Launch two more: the order is most-recent-first, apps never launched keep their old relative order.
 3. Uninstall an app that was in the recent list: nothing breaks, nothing duplicates.
+
+## Previews match what is set (wallpaper, hidden wallpaper, centre image, centre video, floating centre)
+
+Each check fails if a preview shows something other than what is later saved.
+
+- [ ] **Rotated photo.** Take a portrait photo with the camera (it is stored sideways with a rotation
+      tag). Choose it for **Phone wallpaper**. The preview is upright, as in the gallery; after
+      **Apply** the home screen shows the same crop. Repeat for **Hidden wallpaper** and for a
+      **Customise centre** import. Failure caught: a picture lying on its side.
+- [ ] **Preview = result.** Pick a landscape photo with a recognisable subject at one edge. Note what
+      the preview cuts off, **Apply**, and compare with the home screen. Same crop, same edges.
+- [ ] **Hidden wallpaper.** The Hidden box shows a thumbnail once one is set, and says "No hidden
+      wallpaper yet" before. Choose a picture: the preview is titled "Hidden wallpaper", **Apply**
+      is disabled until the picture has opened, and "Hidden wallpaper saved" appears only after it
+      has been written. **Switch** (shown only when one is set) flips between the two and the line
+      beside it follows; the triple tap agrees with it.
+- [ ] **Unreadable picture.** Choose a corrupt or removed file: the preview says it could not be
+      opened, **Apply** stays disabled, **Cancel** works.
+- [ ] **Process death.** With a picture pending, open the system picker, then use developer options
+      "Don't keep activities" or kill the app from recents; coming back restores the pending picture.
+- [ ] **Framing pinch.** In **Customise centre → Import**, pinch on a feature: it stays under the
+      fingers while it grows and shrinks. Rotate a square picture after moving it: it re-centres.
+- [ ] **Framing = saved centre.** The bright area (inside the circle) is what the centre shows; the
+      dimmed area is not. Compare with the wheel after **Done**, for a picture and for a video.
+- [ ] **Video still.** Import a portrait video and a landscape video: the framing still has the
+      video's own proportions (not stretched), and the playing centre matches the framing.
+- [ ] **Floating centre, every edge.** Dock the floating wheel to the right, left, top and bottom edge
+      in turn, and frame its centre each time. The guide is the half that faces into the screen
+      (left half for the right edge, right for the left, lower for the top, upper for the bottom)
+      and the rest is dimmed. After **Done** the visible half of the real centre matches the bright half.

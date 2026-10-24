@@ -1,5 +1,6 @@
 package com.orbit.home.ui.settings
 
+import com.orbit.home.overlay.DockEdge
 
 /**
  * Where the picture sits behind the frame, and how big it is.
@@ -63,4 +64,39 @@ object CropMath {
         return scale.coerceIn(floor, maxOf(floor, ceiling))
     }
 
+    /**
+     * Where the picture's centre ends up when it is scaled by [ratio] about the point
+     * ([focusX], [focusY]) and then moved by ([panX], [panY]).
+     *
+     * All measured from the frame's centre. The point under the fingers stays under the fingers
+     * while pinching, which is what makes the framing land where it was aimed; zooming about the
+     * picture's own centre instead makes the picture slide away from the fingers as it grows.
+     */
+    fun zoomAbout(
+        offsetX: Float,
+        offsetY: Float,
+        focusX: Float,
+        focusY: Float,
+        ratio: Float,
+        panX: Float,
+        panY: Float
+    ): Pair<Float, Float> = Pair(
+        focusX + (offsetX - focusX) * ratio + panX,
+        focusY + (offsetY - focusY) * ratio + panY
+    )
+}
+
+/**
+ * Where the arc of the half of a centre that stays on screen starts, in Compose's degrees
+ * (0 at three o'clock, clockwise), with a sweep of 180.
+ *
+ * The floating wheel's centre sits on the screen edge it is docked to, so only the half facing into
+ * the screen is ever seen — which half depends on the edge: the left half on the right edge, the
+ * right half on the left edge, the lower half on the top edge and the upper half on the bottom edge.
+ */
+internal fun visibleArcStartAngle(edge: DockEdge): Float = when (edge) {
+    DockEdge.RIGHT -> 90f   // bottom, round the left, to the top
+    DockEdge.LEFT -> 270f   // top, round the right, to the bottom
+    DockEdge.TOP -> 0f      // right, round the bottom, to the left
+    DockEdge.BOTTOM -> 180f // left, round the top, to the right
 }

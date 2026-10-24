@@ -1366,7 +1366,7 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     SettingsRoute.WALLPAPER -> SettingsWallpaperPage(
                         hiddenShowing = state.hiddenWallpaperShowing,
                         hiddenWallpaper = hiddenWallpaper,
-                        onSetHidden = { uri -> viewModel.setHiddenWallpaper(uri) },
+                        onSetHidden = { uri, onResult -> viewModel.setHiddenWallpaper(uri, onResult) },
                         onToggleHidden = { viewModel.toggleHiddenWallpaper() },
                         onBack = backToList
                     )
@@ -1423,8 +1423,13 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     onCancel = { viewModel.cancelCentreImport() },
                     onDone = { framed, framing -> viewModel.finishCentreImport(framed, framing) },
                     // The floating wheel's centre is half outside the screen, so its guide is half a
-                    // circle: promising a whole one would promise what the screen cannot show.
-                    edgeMounted = pendingCentre.target == CentreTarget.FLOATING
+                    // circle: promising a whole one would promise what the screen cannot show. Which
+                    // half is decided by the edge the wheel is docked to.
+                    dockEdge = if (pendingCentre.target == CentreTarget.FLOATING) {
+                        com.orbit.home.overlay.DockEdge.fromId(state.shortcutEdge)
+                    } else {
+                        null
+                    }
                 )
             }
         }
