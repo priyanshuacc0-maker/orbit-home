@@ -14,6 +14,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.orbit.home.animation.WheelGeometry
 import com.orbit.home.apps.DockDefaults
+import com.orbit.home.apps.RecentApps
 import com.orbit.home.diagnostics.Diagnostics
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
@@ -141,6 +142,8 @@ data class HomeSettings(
     val centreFloating: CentreChoice = CentreChoice.Default,
     /** Ordered dock apps, as stable `package/activity` ids. */
     val dockApps: List<String> = emptyList(),
+    /** App ids in the order they were last launched from the launcher, most recent first. */
+    val recentApps: List<String> = emptyList(),
     /** True once the dock has been seeded, so a later empty scan cannot re-seed it. */
     val dockInitialized: Boolean = false,
     /** Whether the floating shortcut wheel is on. */
@@ -268,6 +271,7 @@ class AppPreferences(private val context: Context) {
         val DRAWER_GRID = booleanPreferencesKey("drawer_grid")
         val WHEEL_MATCH_HINT = booleanPreferencesKey("wheel_match_hint_seen")
         val DOCK_APPS = stringPreferencesKey("dock_apps")
+        val RECENT_APPS = stringPreferencesKey("recent_apps")
         val DOCK_INITIALIZED = booleanPreferencesKey("dock_initialized")
         val SHORTCUT_ENABLED = booleanPreferencesKey("shortcut_enabled")
         val SHORTCUT_APPS = stringPreferencesKey("shortcut_apps")
@@ -362,6 +366,7 @@ class AppPreferences(private val context: Context) {
                 ?: CentreChoicesCodec.migrateLegacy(p[Keys.CENTRE_HOME]),
             centreFloating = CentreCodec.decode(p[Keys.CENTRE_FLOATING]),
             dockApps = p[Keys.DOCK_APPS]?.split("\n")?.filter { it.isNotBlank() } ?: emptyList(),
+            recentApps = p[Keys.RECENT_APPS]?.split("\n")?.filter { it.isNotBlank() } ?: emptyList(),
             dockInitialized = p[Keys.DOCK_INITIALIZED] ?: false,
             shortcutEnabled = p[Keys.SHORTCUT_ENABLED] ?: false,
             floatingShortcuts = p[Keys.FLOATING_SHORTCUTS]?.split("\n")?.filter { it.isNotBlank() }
@@ -685,6 +690,14 @@ class AppPreferences(private val context: Context) {
 
     suspend fun setDockApps(ids: List<String>) {
         context.dataStore.edit { it[Keys.DOCK_APPS] = ids.take(HomeSettings.DOCK_MAX).joinToString("\n") }
+    }
+
+    /** Remembers that [id] was just launched, so the wheel can put it first. */
+    suspend fun recordRecentApp(id: String) {
+        context.dataStore.edit { p ->
+            val current = p[Keys.RECENT_APPS]?.split("\n")?.filter { it.isNotBlank() }.orEmpty()
+            p[Keys.RECENT_APPS] = RecentApps.push(current, id).joinToString("\n")
+        }
     }
 
     suspend fun setDockInitialized(initialized: Boolean) {

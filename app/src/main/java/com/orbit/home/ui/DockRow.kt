@@ -1,9 +1,7 @@
 package com.orbit.home.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +29,18 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.runtime.key
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import com.orbit.home.apps.DockLayout
+import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -64,10 +74,28 @@ private const val REARM_MILLIS = 500L
 private val DRAG_OUT = 40.dp
 
 /**
+ * Where the dock's icons row is, in root coordinates, written by [DockRow] and read by whoever decides
+ * whether something carried from outside should be dropped on it. Plain fields, not state: it is only
+ * ever read at the moment of a drop.
+ */
+internal class DockGeometry {
+    var left = 0f
+    var width = 0f
+    var icon = 0f
+}
+
+/** How the icons settle into their slots: quick, soft, no bounce. */
+private val SlotSpring = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 650f)
+
+/**
  * The dock: up to five apps above the navigation bar.
  *
  * Dragging it upwards opens the all-apps drawer. Nothing on the dock changes when
  * that happens — a tap or long press still belongs to the icon under the finger.
+ *
+ * Icons are laid out by hand, one slot each, and glide between slots: reordering, an app being carried
+ * in from outside (a gap opens where it would land) and an icon being let go all animate rather than
+ * jump.
  */
 @Composable
 fun DockRow(
@@ -107,9 +135,22 @@ fun DockRow(
     onDragOutMove: (Offset) -> Unit = {},
     onDragOutEnd: (Offset) -> Unit = {},
     onDragOutCancel: () -> Unit = {},
+    /**
+     * Where an app being carried in from outside the dock is, in root coordinates - but only while it
+     * is over the dock and the dock can take it; null otherwise. While it is set the icons part to leave
+     * a gap where it would land. A lambda, so the finger moving does not recompose the dock.
+     */
+    incoming: () -> Offset? = { null },
+    /**
+     * The app that was carried out of this dock and is still on its way somewhere. Its slot stays, empty,
+     * until the home screen has decided: if it lands it goes from the dock, if not it fades back in.
+     */
+    carriedOutId: String? = null,
+    geometry: DockGeometry? = null,
 ) {
     val density = LocalDensity.current
     val px = with(density) { DOCK_ICON_SIZE.roundToPx() }
+    val iconPx = px.toFloat()
     val openThreshold = with(density) { DOCK_SWIPE_UP.toPx() }
     val travel = if (pullDistancePx > 0f) pullDistancePx else openThreshold
     val haptics = rememberOrbitHaptics()
@@ -131,7 +172,18 @@ fun DockRow(
     // is left empty rather than showing a second copy.
     var outId by remember { mutableStateOf<String?>(null) }
     val dragOutPx = with(density) { DRAG_OUT.toPx() }
-    val slotCentres = remember { HashMap<String, Offset>() }
+
+    val currentIncoming by rememberUpdatedState(incoming)
+    // The slot an app carried in from outside would take, or null when nothing is over the dock. Derived,
+    // so the dock only recomposes when the gap moves, not on every pixel of the finger.
+    val hole by remember {
+        derivedStateOf {
+            currentIncoming()?.let {
+                DockLayout.insertionIndex(it.x - rowLeft, order.size, rowWidth, iconPx)
+            }
+        }
+    }
+    LaunchedEffect(hole) { if (hole != null) haptics.tap() }
 
     LaunchedEffect(armed) {
         if (!armed) {
@@ -175,14 +227,25 @@ fun DockRow(
                             val dy = change.position.y - startY
                             val dx = change.position.x - startX
                             if (!decided) {
-                                // Half the usual slop, so the drawer starts on the first small movement; and
-                                // a slightly diagonal swipe still counts as upward.
-                                if (abs(dy) > slop * 0.5f || abs(dx) > slop * 0.5f) {
+                                // The full slop, the same one the long press tolerates. Half of it let a
+                                // hand that was merely holding an icon (to pick it up) drift into a
+                                // "pull", which took the finger away and killed the pick-up. A slightly
+                                // diagonal swipe still counts as upward.
+                                if (abs(dy) > slop || abs(dx) > slop) {
                                     decided = true
-                                    upward = !carrying && dy < 0f && abs(dy) * 1.4f > abs(dx)
+                                    upward = !carrying && dragId == null && dy < 0f && abs(dy) * 1.4f > abs(dx)
                                 }
                             }
                             if (!decided || !upward) continue
+                            // An icon that was picked up after the pull began wins: let go of the pull.
+                            if (carrying || dragId != null) {
+                                if (pulling) {
+                                    pulling = false
+                                    onDrawerRelease(false, 0f)
+                                }
+                                upward = false
+                                continue
+                            }
                             pulling = true
                             change.consume()
                             travelled = dy.coerceAtMost(0f)
@@ -213,23 +276,31 @@ fun DockRow(
                 }
             }
     ) {
-        Row(
+        // The row the icons live in: one icon tall, icons placed in it by hand.
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 // No pill behind the icons: the dock sits on the wallpaper like everything else, and a
                 // translucent slab under it reads as a shadow the dock does not cast.
                 .padding(horizontal = 8.dp, vertical = 8.dp)
+                .height(DOCK_ICON_SIZE)
                 .onGloballyPositioned {
-                    rowLeft = it.positionInRoot().x
-                    rowTop = it.positionInRoot().y
+                    val at = it.positionInRoot()
+                    rowLeft = at.x
+                    rowTop = at.y
                     rowWidth = it.size.width.toFloat()
-                },
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
+                    geometry?.let { g ->
+                        g.left = at.x
+                        g.width = it.size.width.toFloat()
+                        g.icon = iconPx
+                    }
+                }
         ) {
             val byId = apps.associateBy { it.id }
-            for (id in order) {
-                val app = byId[id] ?: continue
+            val shown = order.filter { it in byId }
+            val slots = shown.size + if (hole != null) 1 else 0
+            shown.forEachIndexed { position, id ->
+                val app = byId.getValue(id)
                 key(id) {
                     val icon = rememberAppIcon(app.id, px, iconLoader)
                     val callbacks = remember(id, apps) {
@@ -257,10 +328,7 @@ fun DockRow(
                                 // Which slot the finger is over, from where the evenly spaced slots are.
                                 val n = order.size
                                 if (outId == null && n > 1 && rowWidth > 0f) {
-                                    val w = px.toFloat()
-                                    val gap = (rowWidth - n * w) / (n + 1)
-                                    val target = ((at.x - rowLeft - gap - w / 2f) / (gap + w))
-                                        .roundToInt().coerceIn(0, n - 1)
+                                    val target = DockLayout.nearestSlot(at.x - rowLeft, n, rowWidth, iconPx)
                                     val from = order.indexOf(id)
                                     if (from >= 0 && target != from) {
                                         order = order.toMutableList().apply {
@@ -275,7 +343,12 @@ fun DockRow(
                                 dragId = null
                                 if (outId == id) {
                                     outId = null
-                                    onDragOutEnd(at)
+                                    if (at.y > rowTop) {
+                                        // Let go back over the dock without a move in between: it stays.
+                                        onDragOutCancel()
+                                    } else {
+                                        onDragOutEnd(at)
+                                    }
                                     order = apps.map { it.id }
                                 } else if (order != apps.map { it.id }) {
                                     onReorder(order)
@@ -306,26 +379,16 @@ fun DockRow(
                             }
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .onGloballyPositioned { c ->
-                                val p = c.positionInRoot()
-                                slotCentres[id] = Offset(p.x + c.size.width / 2f, p.y + c.size.height / 2f)
-                            }
-                            .appDragSource(callbacks, early = true)
-                            .zIndex(if (dragId == id) 1f else 0f)
-                            .graphicsLayer {
-                                if (dragId == id) {
-                                    val c = slotCentres[id]
-                                    if (c != null) {
-                                        translationX = dragPos.x - c.x
-                                        translationY = dragPos.y - c.y
-                                    }
-                                    scaleX = 1.15f
-                                    scaleY = 1.15f
-                                    alpha = if (outId == id) 0f else 0.92f
-                                }
-                            }
+                    val slot = DockLayout.slotFor(position, hole)
+                    val targetLeft = if (rowWidth > 0f) DockLayout.slotLeft(slot, slots, rowWidth, iconPx) else 0f
+                    DockSlot(
+                        targetLeft = targetLeft,
+                        ready = rowWidth > 0f,
+                        dragging = dragId == id,
+                        hidden = outId == id || carriedOutId == id,
+                        fingerLeft = { dragPos.x - rowLeft - iconPx / 2f },
+                        fingerTop = { dragPos.y - rowTop - iconPx / 2f },
+                        modifier = Modifier.appDragSource(callbacks, early = true)
                     ) {
                         AppIcon(
                             label = app.label,
@@ -347,4 +410,70 @@ fun DockRow(
             }
         }
     }
+}
+
+/**
+ * One dock slot: an icon that glides to wherever its slot is, follows the finger exactly while it is
+ * picked up, and glides from the finger into its slot when let go (instead of jumping there).
+ */
+@Composable
+private fun DockSlot(
+    targetLeft: Float,
+    ready: Boolean,
+    dragging: Boolean,
+    hidden: Boolean,
+    fingerLeft: () -> Float,
+    fingerTop: () -> Float,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val x = remember { Animatable(0f) }
+    val y = remember { Animatable(0f) }
+    var placed by remember { mutableStateOf(false) }
+
+    // While carried, keep the animation values on the finger, so that on release the glide to the slot
+    // starts from where the icon actually is.
+    LaunchedEffect(dragging) {
+        if (dragging) {
+            snapshotFlow { fingerLeft() to fingerTop() }.collect { (fx, fy) ->
+                x.snapTo(fx)
+                y.snapTo(fy)
+            }
+        }
+    }
+    LaunchedEffect(targetLeft, ready, dragging) {
+        if (!ready || dragging) return@LaunchedEffect
+        if (!placed) {
+            x.snapTo(targetLeft)
+            y.snapTo(0f)
+            placed = true
+        } else {
+            launch { y.animateTo(0f, SlotSpring) }
+            x.animateTo(targetLeft, SlotSpring)
+        }
+    }
+
+    val scale by animateFloatAsState(if (dragging) 1.15f else 1f, label = "dockScale")
+    val alpha by animateFloatAsState(
+        targetValue = when {
+            hidden || !placed -> 0f
+            dragging -> 0.92f
+            else -> 1f
+        },
+        label = "dockAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .size(DOCK_ICON_SIZE)
+            .zIndex(if (dragging) 1f else 0f)
+            .graphicsLayer {
+                translationX = if (dragging) fingerLeft() else x.value
+                translationY = if (dragging) fingerTop() else y.value
+                scaleX = scale
+                scaleY = scale
+                this.alpha = alpha
+            },
+        content = content
+    )
 }

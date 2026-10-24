@@ -103,6 +103,7 @@ import com.orbit.home.R
 import com.orbit.home.animation.Motion
 import com.orbit.home.animation.WheelMotionState
 import com.orbit.home.preferences.HomeSettings
+import com.orbit.home.apps.DockLayout
 import com.orbit.home.preferences.WheelLook
 import com.orbit.home.ui.settings.SettingsArea
 import com.orbit.home.preferences.CentreTarget
@@ -512,6 +513,48 @@ fun HomeScreen(viewModel: HomeViewModel) {
 
     // Where the dock begins, so a tap on it is not a tap on the wallpaper behind it.
     var dockTopPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    // With no dock on screen there is nothing to drop on, and the last position it had is stale.
+    LaunchedEffect(state.dockApps.isEmpty()) {
+        if (state.dockApps.isEmpty()) dockTopPx = Float.MAX_VALUE
+    }
+
+    // ---- The dock as a drop target ----------------------------------------------------------
+    // Anything carried over the dock - from the drawer, from the home grid, out of a folder - is
+    // dropped on the dock and not on the grid behind it. Positions here are all in root coordinates.
+    val dockGeometry = remember { DockGeometry() }
+    // An app being carried inside the home grid (or out of one of its folders): which, and where.
+    var gridCarry by remember {
+        mutableStateOf<Pair<String, androidx.compose.ui.geometry.Offset>?>(null)
+    }
+    val dockIds = state.dockApps.map { it.id }
+    val overDock: (Float) -> Boolean = { y -> y >= dockTopPx }
+    val canDock: (String) -> Boolean = { id ->
+        !GridFolders.isFolderId(id) && state.allApps.any { it.id == id } &&
+            DockLayout.accepts(dockIds, id, HomeSettings.DOCK_MAX)
+    }
+    // Where the carried app is while it is over a dock that can take it, so the dock can open a gap.
+    val dockIncoming: () -> androidx.compose.ui.geometry.Offset? = {
+        val d = appDrag
+        val g = gridCarry
+        when {
+            d != null && !d.released && overDock(appDragPos.y) && canDock(d.id) -> appDragPos
+            g != null && overDock(g.second.y) && canDock(g.first) -> g.second
+            else -> null
+        }
+    }
+    // Puts the app on the dock where it was let go. False (and nothing changes) if the dock cannot take it.
+    val dropOnDock: (String, androidx.compose.ui.geometry.Offset) -> Boolean = drop@{ id, at ->
+        if (!overDock(at.y) || !canDock(id)) return@drop false
+        val index = if (dockGeometry.width > 0f) {
+            DockLayout.insertionIndex(at.x - dockGeometry.left, dockIds.size, dockGeometry.width, dockGeometry.icon)
+        } else dockIds.size
+        val next = DockLayout.insert(dockIds, id, index, HomeSettings.DOCK_MAX) ?: return@drop false
+        viewModel.saveDockOrder(next)
+        haptics.confirm()
+        true
+    }
+    // Whether an app carried out of the drawer can be dropped on the home grid at all.
+    val gridDropAllowed = state.homeGrid && state.homeInitialized
     val tripleTap = remember { TripleTapCounter() }
 
     // True while anything is drawn over the home screen. The home content must not react to, or
@@ -820,6 +863,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     iconLoader = viewModel.iconLoader,
                     onLaunch = viewModel::launch,
                     externalDrag = appDrag,
+                    onDropOnDock = dropOnDock,
+                    onCarryMove = { id, at -> gridCarry = if (id != null && at != null) id to at else null },
                     externalPosition = { appDragPos },
                     onExternalDragDone = { landed ->
                         val fromDock = dockCarried
@@ -1046,6 +1091,9 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     onDrawerRelease = { open, velocityY -> releaseDrawer(open, velocityY) },
                     pullDistancePx = drawerTravelPx,
                     onReorder = viewModel::saveDockOrder,
+                    incoming = dockIncoming,
+                    carriedOutId = dockCarried,
+                    geometry = dockGeometry,
                     onDragOut = if (state.homeGrid && state.homeInitialized) {
                         { app, at ->
                             appDragPos = at
@@ -1145,7 +1193,10 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     homeAppIds = state.homeApps.toSet(),
                     // Hold and drag an icon out to put it on a grid home, as Quickstep does. Not offered
                     // for the wheel, or before the grid has been arranged (Add to home refuses then too).
-                    onAppDragStart = if (state.homeGrid && state.homeInitialized) {
+                    //
+                    // Also offered with the wheel (or an un-arranged grid) as long as there is a dock
+                    // to drop it on: the dock takes apps from the drawer whichever home is showing.
+                    onAppDragStart = if (gridDropAllowed || state.dockApps.isNotEmpty()) {
                         { app, at ->
                             appDragPos = at
                             appDrag = ExternalAppDrag(app.id, at.x, at.y)
@@ -1155,7 +1206,22 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     onAppDragMove = { at -> appDragPos = at },
                     onAppDragEnd = { at ->
                         appDragPos = at
-                        appDrag = appDrag?.copy(x = at.x, y = at.y, released = true)
+                        val carried = appDrag
+                        when {
+                            carried == null -> Unit
+                            // Over the dock the dock decides, never the grid behind it.
+                            overDock(at.y) -> {
+                                dropOnDock(carried.id, at)
+                                appDrag = null
+                            }
+                            gridDropAllowed -> {
+                                appDrag = carried.copy(x = at.x, y = at.y, released = true)
+                            }
+                            // No grid to land on: letting go anywhere else just puts it back.
+                            else -> {
+                                appDrag = null
+                            }
+                        }
                     },
                     onAppDragCancel = { appDrag = null }
                 )

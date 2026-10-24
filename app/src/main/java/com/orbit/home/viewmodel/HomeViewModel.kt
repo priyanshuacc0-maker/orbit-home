@@ -13,6 +13,7 @@ import com.orbit.home.apps.DockDefaults
 import com.orbit.home.apps.InstalledApp
 import com.orbit.home.apps.changedPackages
 import com.orbit.home.apps.inventoryChanged
+import com.orbit.home.apps.RecentApps
 import com.orbit.home.apps.WheelApps
 import com.orbit.home.ui.settings.SettingsRoute
 import com.orbit.home.diagnostics.Diagnostics
@@ -975,6 +976,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // the home screen rather than the list you just chose from.
         _state.update { it.copy(drawerOpen = false) }
         val result = AppLauncher.launch(getApplication(), app)
+        if (result.isSuccess) {
+            // The wheel arranges itself by what was used last.
+            viewModelScope.launch(Dispatchers.IO) { preferences.recordRecentApp(app.id) }
+        }
         if (result.isFailure) {
             Diagnostics.warn("launch refused: ${app.id}", result.exceptionOrNull())
             postMessage(getApplication<Application>().getString(com.orbit.home.R.string.launch_failed))
@@ -1015,7 +1020,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val byId = allApps.associateBy { it.id }
         val resolved = settings.wheels.map { page ->
             ResolvedWheel(
-                apps = WheelApps.resolve(allApps, page),
+                apps = RecentApps.order(WheelApps.resolve(allApps, page), settings.recentApps),
                 selection = page.apps,
                 initialized = page.initialized,
                 look = page.look

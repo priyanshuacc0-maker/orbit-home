@@ -283,3 +283,22 @@ switch at Settings > Haptic feedback, and by the system's Touch feedback setting
 - [ ] Uninstall an app that is in a folder: it disappears from the folder. Uninstall every app in a folder:
       the folder's cell goes empty and nothing else moves.
 - [ ] With the system animation scale at 0, everything above still works, without the slide.
+
+## Dock drag & drop, and wheel ordering (manual)
+
+Dock (grid mode unless noted):
+
+1. Long-press a dock icon and slide it sideways: the others glide aside, nothing snaps; let go and it glides into its slot.
+2. Carry a dock icon up onto the grid and drop it in a cell: it leaves the dock, the dock closes the gap smoothly, and it never flashes back into the dock first.
+3. Carry a dock icon up, then bring it back down onto the dock and let go: it stays on the dock.
+4. Drag an app from the drawer onto the dock (grid **and** wheel mode): the dock opens a gap under the finger; drop it and it takes that place.
+5. Same from the home grid, and from inside an open folder: dropped on the dock it moves there and leaves the grid/folder.
+6. With a full dock (5), or for an app already on the dock: no gap opens, and letting go puts the app back where it came from.
+7. Hold a dock icon still for a second with a slightly shaky finger: it is picked up (the drawer must not start opening).
+8. Swiping up on the dock still opens the drawer; tapping an icon still launches it.
+
+Wheel ordering:
+
+1. Launch an app from the wheel, drawer, grid or dock, return home: it is now first on the wheel.
+2. Launch two more: the order is most-recent-first, apps never launched keep their old relative order.
+3. Uninstall an app that was in the recent list: nothing breaks, nothing duplicates.

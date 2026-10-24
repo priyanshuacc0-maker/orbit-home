@@ -112,6 +112,16 @@ fun GridHome(
     externalPosition: (() -> Offset)? = null,
     /** Called when a carried app has been let go; [landed] is true if it was put into a cell. */
     onExternalDragDone: (landed: Boolean) -> Unit = {},
+    /**
+     * Offered an app that was let go (root coordinates) outside the grid's cells. Returns true if the
+     * dock took it, in which case the app leaves the home grid. Null when there is no dock.
+     */
+    onDropOnDock: ((id: String, at: Offset) -> Boolean)? = null,
+    /**
+     * The app being carried inside the grid (or out of a folder) and where it is, in root coordinates;
+     * both null when nothing is. Lets the dock open a gap under it.
+     */
+    onCarryMove: (id: String?, at: Offset?) -> Unit = { _, _ -> },
     /** With motion off, apps still get out of the way - they just arrive in one frame. */
     reducedMotion: Boolean = false,
     modifier: Modifier = Modifier
@@ -265,6 +275,8 @@ fun GridHome(
         // temporary page is added. Restarting pointerInput mid-drag cancels the carried item.
         val livePageCount = rememberUpdatedState(pageCount)
         val liveExternalDrag = rememberUpdatedState(activeDrag)
+        val latestDropOnDock = rememberUpdatedState(onDropOnDock)
+        val latestCarryMove = rememberUpdatedState(onCarryMove)
         val liveOrigin = rememberUpdatedState(origin)
         val pager = rememberPagerState(pageCount = { pageCount })
         // A light detent each time the grid turns to another page, whether the finger swiped it
@@ -353,6 +365,16 @@ fun GridHome(
                     DropAction.UNINSTALL ->
                         byId[current.id]?.let { AppActions.uninstall(context, it.packageName) }
                 }
+                return
+            }
+
+            // Carried down onto the dock and let go: the dock takes it, and it leaves the home grid.
+            if (current != null && carried && !GridFolders.isFolderId(current.id) &&
+                latestDropOnDock.value?.invoke(current.id, Offset(current.x + origin.x, current.y + origin.y)) == true
+            ) {
+                expandedPageCount = 0
+                carried = false
+                removeFromHome(current.id)
                 return
             }
 
@@ -469,6 +491,19 @@ fun GridHome(
             }
         }
 
+        // Tell the home screen where a carried app is, so the dock can open a gap when it is over it.
+        LaunchedEffect(Unit) {
+            snapshotFlow {
+                val h = held
+                val f = folderDrag
+                when {
+                    h != null && carried -> h.id to Offset(h.x + origin.x, h.y + origin.y)
+                    f != null && !f.released -> f.id to Offset(f.x, f.y)
+                    else -> null
+                }
+            }.collect { latestCarryMove.value(it?.first, it?.second) }
+        }
+
         LaunchedEffect(ext?.id, ext?.released) {
             val e = ext
             if (e == null) {
@@ -494,6 +529,17 @@ fun GridHome(
             // turn finish before resolving the drop cell; otherwise the app can be saved to the
             // page that is no longer on screen.
             snapshotFlow { pageTurnInProgress }.first { !it }
+            // Carried out of a folder and let go on the dock: it goes there, and leaves the folder.
+            if (folderDrag != null && !GridFolders.isFolderId(e.id) &&
+                latestDropOnDock.value?.invoke(e.id, Offset(e.x, e.y)) == true
+            ) {
+                val taken = GridFolders.takeOut(FolderLayout(cells, liveFolders), e.id)
+                commit(homeIds.filterNot { it == e.id }, taken.cells, taken.folders)
+                expandedPageCount = 0
+                folderDrag = null
+                openFolderId = null
+                return@LaunchedEffect
+            }
             val finalX = e.x - origin.x
             val finalY = e.y - origin.y
             val to = cellAt(pager.currentPage, finalX, finalY)
