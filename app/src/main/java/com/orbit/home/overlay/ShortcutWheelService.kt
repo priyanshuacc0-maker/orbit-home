@@ -1509,12 +1509,10 @@ class ShortcutWheelService : Service() {
 
                     .background(
                         color = OrbitColors.Accent,
-                        shape = when (edge) {
-                            DockEdge.RIGHT -> RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp)
-                            DockEdge.LEFT -> RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp)
-                            DockEdge.TOP -> RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp)
-                            DockEdge.BOTTOM -> RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)
-                        }
+                        // Rounded on every corner, so the bar is a full pill with no flat edge
+                        // pressed against the screen. It used to be rounded only on its
+                        // inward-facing side, with the screen-edge corners square.
+                        shape = RoundedCornerShape(10.dp)
                     )
             )
         }
