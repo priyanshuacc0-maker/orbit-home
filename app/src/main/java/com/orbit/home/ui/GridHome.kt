@@ -59,12 +59,14 @@ import com.orbit.home.apps.AppActions
 import com.orbit.home.apps.AppIconLoader
 import com.orbit.home.apps.AppLabels
 import com.orbit.home.apps.InstalledApp
+import com.orbit.home.preferences.GridFolder
 import com.orbit.home.ui.theme.OrbitColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -84,13 +86,18 @@ fun GridHome(
     homeApps: List<String>,
     homeInitialized: Boolean,
     /**
-     * Called once with the whole layout - which apps this screen holds, and where they are.
+     * Called once with the whole layout - which apps this screen holds, where they are, and the folders.
      *
      * One callback and not two: membership and arrangement are one thing, and handing them over
      * separately is what allowed a half-applied screen to be written down.
      */
-    onSaveLayout: (List<String>, List<String>) -> Unit,
+    onSaveLayout: (List<String>, List<String>, List<GridFolder>) -> Unit,
     order: List<String>,
+    /**
+     * The folders. A folder is a cell like an app is: its id sits in the layout, and the apps inside it
+     * have no cell of their own. They are saved with the cells in the one [onSaveLayout] call.
+     */
+    folders: List<GridFolder> = emptyList(),
     iconLoader: AppIconLoader,
     onLaunch: (InstalledApp) -> Unit,
     /**
@@ -115,8 +122,14 @@ fun GridHome(
     // storage and drawing from it means a moment of the old arrangement, which reads as the app
     // going back where it was and then jumping.
     var dropped by remember { mutableStateOf<List<String>?>(null) }
-    LaunchedEffect(order, dropped) {
-        if (dropped != null && order == dropped) dropped = null
+    // The folders that go with `dropped`: the cells name folders, so the two are held together or a
+    // new folder's cell would be empty until the stored folders caught up.
+    var droppedFolders by remember { mutableStateOf<List<GridFolder>?>(null) }
+    LaunchedEffect(order, dropped, folders, droppedFolders) {
+        if (dropped != null && order == dropped && (droppedFolders == null || folders == droppedFolders)) {
+            dropped = null
+            droppedFolders = null
+        }
     }
     // If the write fails, the stored order never matches. Fall back to what is really stored rather than
     // showing an arrangement that will vanish on restart.
@@ -124,6 +137,7 @@ fun GridHome(
         if (dropped != null) {
             delay(3000)
             dropped = null
+            droppedFolders = null
         }
     }
     // The apps this screen holds, not every app on the phone: a home screen is a chosen set, and
@@ -139,6 +153,16 @@ fun GridHome(
     val haptics = rememberOrbitHaptics()
     val scope = rememberCoroutineScope()
     var held by remember { mutableStateOf<HeldApp?>(null) }
+    // An app being carried out of an open folder. It is handled as one arriving from outside the grid -
+    // the same as an app dragged in from the drawer - so everything that drop already knows applies.
+    var folderDrag by remember { mutableStateOf<ExternalAppDrag?>(null) }
+    // The drawer's drag if there is one, otherwise the one out of a folder.
+    val activeDrag = externalDrag ?: folderDrag
+    // The folder that is open, if any.
+    var openFolderId by remember { mutableStateOf<String?>(null) }
+    // The cell a carried app has been held over long enough that dropping it will make or fill a
+    // folder there, rather than reorder.
+    var folderTarget by remember { mutableStateOf<Int?>(null) }
     // The app whose menu is showing, and where to put it. Cleared the moment a drag begins.
     var menuFor by remember { mutableStateOf<String?>(null) }
     var menuAt by remember { mutableStateOf<Offset?>(null) }
@@ -187,8 +211,22 @@ fun GridHome(
         val homeIds = if (homeInitialized) homeApps else (seeded ?: emptyList())
 
 
-        val cells = remember(sorted, order, dropped, homeIds) {
-            GridOrder.cells(homeIds, dropped ?: order)
+        val liveFolders = droppedFolders ?: folders
+        val folderById = remember(liveFolders) { liveFolders.associateBy { it.id } }
+        // What has a cell: the apps that are not in a folder, and the folders. An app in a folder is
+        // somewhere else, and listing it here as well would put it on the screen twice.
+        val cellIds = remember(homeIds, liveFolders, byId) {
+            GridFolders.cellIds(homeIds, liveFolders, byId.keys)
+        }
+        val cells = remember(sorted, order, dropped, cellIds) {
+            GridOrder.cells(cellIds, dropped ?: order)
+        }
+
+        /** Saves the layout, and holds it on screen until what was stored catches up. */
+        fun commit(ids: List<String>, newCells: List<String>, newFolders: List<GridFolder>) {
+            dropped = newCells
+            droppedFolders = newFolders
+            onSaveLayout(ids, newCells, newFolders)
         }
 
         /**
@@ -200,9 +238,17 @@ fun GridHome(
          * is in the drawer, where it still is.
          */
         fun removeFromHome(id: String) {
+            val folder = folderById[id]
+            if (folder != null) {
+                // A folder goes with everything in it. They are all still in the drawer.
+                val out = GridFolders.remove(FolderLayout(cells, liveFolders), id)
+                commit(homeIds.filterNot { it in folder.apps }, out.cells, out.folders)
+                return
+            }
             onSaveLayout(
                 homeIds.filterNot { it == id },
-                cells.map { if (it == id) GridOrder.EMPTY else it }
+                cells.map { if (it == id) GridOrder.EMPTY else it },
+                liveFolders
             )
         }
         val perPage = (GRID_COLUMNS * rows).coerceAtLeast(1)
@@ -211,7 +257,7 @@ fun GridHome(
         // Gesture coroutines must see the latest count without being restarted when a new
         // temporary page is added. Restarting pointerInput mid-drag cancels the carried item.
         val livePageCount = rememberUpdatedState(pageCount)
-        val liveExternalDrag = rememberUpdatedState(externalDrag)
+        val liveExternalDrag = rememberUpdatedState(activeDrag)
         val liveOrigin = rememberUpdatedState(origin)
         val pager = rememberPagerState(pageCount = { pageCount })
         // A light detent each time the grid turns to another page, whether the finger swiped it
@@ -236,7 +282,7 @@ fun GridHome(
                 // Membership and arrangement together, once. The gaps ARE the arrangement - the clear
                 // top of the first page is made of empty cells - so they have to be written with it or
                 // the grid fills them with the next app that comes along.
-                onSaveLayout(start.filter { it.isNotEmpty() }, start)
+                onSaveLayout(start.filter { it.isNotEmpty() }, start, emptyList())
             }
         }
         val cellWidth = maxWidth / GRID_COLUMNS
@@ -284,8 +330,13 @@ fun GridHome(
             return firstCellOn(page) + row * GRID_COLUMNS + column
         }
 
-        /** Finish the drop only after any committed page turn has reached a real page. */
-        fun finishHeldDrop(current: HeldApp?) {
+        /**
+         * Finish the drop only after any committed page turn has reached a real page.
+         *
+         * [armed] is the cell the app had been held over long enough to make or fill a folder there,
+         * taken at the moment of letting go: by the time a page turn has settled it would be gone.
+         */
+        fun finishHeldDrop(current: HeldApp?, armed: Int?) {
             val action = current?.let { targetAt(it.x, it.y) }
             if (current != null && action != null) {
                 expandedPageCount = 0
@@ -300,8 +351,13 @@ fun GridHome(
 
             if (current != null && !carried) {
                 expandedPageCount = 0
-                menuFor = current.id
-                menuAt = Offset(current.x, current.y)
+                if (GridFolders.isFolderId(current.id)) {
+                    // A folder has no menu of its own to open, so holding one and letting go opens it.
+                    openFolderId = current.id
+                } else {
+                    menuFor = current.id
+                    menuAt = Offset(current.x, current.y)
+                }
                 carried = false
                 return
             }
@@ -310,22 +366,38 @@ fun GridHome(
             val landed = current?.let { cellAt(pager.currentPage, it.x, it.y) }
             if (current != null && landed != null && current.from != landed) {
                 val page = pager.currentPage
-                val placed = GridOrder.place(
-                    cells,
-                    current.from,
-                    landed,
-                    firstCellOn(page)..(firstCellOn(page) + perPage - 1)
-                )
-                // Show the new position at once. Because the destination may be on a newly
-                // created page, keep this list until persistence catches up.
-                dropped = placed
-                onSaveLayout(homeIds, placed)
+                val target = cells.getOrNull(landed).orEmpty()
+                if (armed == landed && target.isNotEmpty() && target != current.id) {
+                    // Held over it long enough: this is a folder, not a reorder.
+                    val base = FolderLayout(cells, liveFolders)
+                    val out = if (GridFolders.isFolderId(target)) {
+                        GridFolders.putInto(base, target, current.id)
+                    } else {
+                        GridFolders.make(
+                            base, landed, current.id,
+                            GridFolders.newId(liveFolders.mapTo(HashSet()) { it.id }),
+                            NEW_FOLDER_NAME
+                        )
+                    }
+                    haptics.confirm()
+                    commit(homeIds, out.cells, out.folders)
+                } else {
+                    val placed = GridOrder.place(
+                        cells,
+                        current.from,
+                        landed,
+                        firstCellOn(page)..(firstCellOn(page) + perPage - 1)
+                    )
+                    // Show the new position at once. Because the destination may be on a newly
+                    // created page, keep this list until persistence catches up.
+                    commit(homeIds, placed, liveFolders)
+                }
             }
             expandedPageCount = 0
         }
 
         // ---- An app carried in from the drawer -------------------------------------------------
-        val ext = externalDrag
+        val ext = activeDrag
         // One stable coroutine owns edge-turns for a drawer app. It reads the latest drag position
         // rather than being keyed to currentPage/current offset: cancelling an animateScrollToPage
         // at the mid-point is what leaves two half-pages visible. Releasing the app does not cancel
@@ -418,40 +490,106 @@ fun GridHome(
             val finalX = e.x - origin.x
             val finalY = e.y - origin.y
             val to = cellAt(pager.currentPage, finalX, finalY)
-            if (to != null) {
+            val target = to?.let { cells.getOrNull(it) }.orEmpty()
+            // Put back on the folder it came out of: nothing to do, it never left.
+            val backWhereItWas = folderById[target]?.apps?.contains(e.id) == true
+            if (to != null && !backWhereItWas) {
                 val first = firstCellOn(pager.currentPage)
-                val placed = GridOrder.insert(cells, e.id, to, first..(first + perPage - 1))
+                val base = FolderLayout(cells, liveFolders)
+                val out = if (folderTarget == to && target.isNotEmpty() && target != e.id) {
+                    // Held over it long enough: make or fill a folder.
+                    if (GridFolders.isFolderId(target)) {
+                        GridFolders.putInto(base, target, e.id)
+                    } else {
+                        GridFolders.make(
+                            base, to, e.id,
+                            GridFolders.newId(liveFolders.mapTo(HashSet()) { it.id }),
+                            NEW_FOLDER_NAME
+                        )
+                    }
+                } else {
+                    // An app carried out of a folder leaves it first; one from the drawer is in none.
+                    val taken = GridFolders.takeOut(base, e.id)
+                    FolderLayout(
+                        GridOrder.insert(taken.cells, e.id, to, first..(first + perPage - 1)),
+                        taken.folders
+                    )
+                }
                 // The carried app has landed: a completed action, softer than the pick-up.
                 haptics.confirm()
-                dropped = placed
-                onSaveLayout(if (e.id in homeIds) homeIds else homeIds + e.id, placed)
+                commit(if (e.id in homeIds) homeIds else homeIds + e.id, out.cells, out.folders)
             }
             expandedPageCount = 0
-            onExternalDragDone()
+            if (folderDrag != null) {
+                // Out of a folder: the drag is ours to end, and so is the folder it came from.
+                folderDrag = null
+                openFolderId = null
+            } else {
+                onExternalDragDone()
+            }
         }
 
-        // ---- Getting out of the way ---------------------------------------------------------------
-        // The cell a carried app is over, or null if it is over none, or over a drop target at the top.
-        // Held and drawer-carried apps are treated the same: both are about to be dropped on a cell.
+        // ---- Getting out of the way, and making folders --------------------------------------------
+        // Where the carried app is, in this grid's own coordinates, or null if it is over a drop target
+        // at the top. Held and drawer-carried apps are treated the same: both are about to be dropped.
         val hoverHeld = held
-        val hovering: Int? = when {
+        val pointer: Offset? = when {
             hoverHeld != null ->
                 if (targetAt(hoverHeld.x, hoverHeld.y) != null) null
-                else cellAt(pager.currentPage, hoverHeld.x, hoverHeld.y)
-            ext != null -> cellAt(pager.currentPage, ext.x - origin.x, ext.y - origin.y)
+                else Offset(hoverHeld.x, hoverHeld.y)
+            ext != null -> Offset(ext.x - origin.x, ext.y - origin.y)
             else -> null
         }
+        val hovering: Int? = pointer?.let { cellAt(pager.currentPage, it.x, it.y) }
+        val carriedNow = held?.id ?: ext?.id
+
+        // Whether the pointer is over the middle of the cell, which is where a folder is made. The edges
+        // of a cell are for reordering; Launcher3 splits the two the same way, so an app can be put
+        // between two others without making a folder of them.
+        fun nearCentre(cell: Int, at: Offset): Boolean {
+            val local = cell - firstCellOn(pager.currentPage)
+            val cx = (local % GRID_COLUMNS + 0.5f) * cellWidthPx
+            val cy = (local / GRID_COLUMNS + 0.5f) * cellHeightPx
+            return abs(at.x - cx) < cellWidthPx * FOLDER_ZONE && abs(at.y - cy) < cellHeightPx * FOLDER_ZONE
+        }
+
+        // The cell that could become, or fill, a folder: an app over another app, or over a folder with
+        // room. A folder is never carried into anything - they do not nest.
+        val occupant = hovering?.let { cells.getOrNull(it) }.orEmpty()
+        val canMerge = carriedNow != null && occupant.isNotEmpty() && occupant != carriedNow &&
+            !GridFolders.isFolderId(carriedNow) &&
+            (!GridFolders.isFolderId(occupant) ||
+                folderById[occupant]?.let {
+                    carriedNow !in it.apps && it.apps.size < GridFolders.MAX_APPS
+                } == true)
+        val mergeCell: Int? =
+            if (canMerge && hovering != null && pointer != null && nearCentre(hovering, pointer)) hovering
+            else null
+        // Held there long enough to count. Short of that, passing over an app on the way to somewhere
+        // else would offer to put the carried one in it.
+        LaunchedEffect(mergeCell) {
+            if (mergeCell == null) {
+                folderTarget = null
+            } else {
+                delay(FOLDER_DWELL_MS)
+                folderTarget = mergeCell
+                haptics.pageSnap()
+            }
+        }
+
+        // While a folder is being offered, nothing makes room: the app is going in, not between.
+        val previewHover = if (mergeCell != null) null else hovering
         // The hover only counts once it has stayed on one cell for a moment. Without that, a finger
         // passing over four apps on its way somewhere would shove all four aside in turn. Launcher3
         // waits too. Moving to another cell keeps the last preview until the new one has settled, so
         // the grid does not flicker back and forth in between.
         var previewTo by remember { mutableStateOf<Int?>(null) }
-        LaunchedEffect(hovering) {
-            if (hovering == null) {
+        LaunchedEffect(previewHover) {
+            if (previewHover == null) {
                 previewTo = null
             } else {
                 delay(PREVIEW_DWELL_MS)
-                previewTo = hovering
+                previewTo = previewHover
             }
         }
         // Which apps would move if the carried one were dropped now, and into which cell. It is the
@@ -486,7 +624,10 @@ fun GridHome(
                         detectDragGesturesAfterLongPress(
                             onDragStart = { start ->
                                 expandedPageCount = 0
-                                val cell = cellAt(pager.currentPage, start.x, start.y)
+                                // An open folder sits over the grid and has its own holds: whatever is
+                                // under it must not be picked up through it.
+                                val cell = if (openFolderId != null) null
+                                else cellAt(pager.currentPage, start.x, start.y)
                                 val picked = cell?.takeIf { cells.getOrNull(it)?.isNotEmpty() == true }
                                 if (picked != null) {
                                     // The moment the app comes off the grid. Launcher3 fires a LONG_PRESS
@@ -595,18 +736,20 @@ fun GridHome(
                             },
                             onDragEnd = {
                                 val current = held
+                                // Taken now: letting go clears it, and a page turn can still be settling.
+                                val armed = folderTarget
                                 held = null
                                 if (pageTurnInProgress) {
                                     // Do not interrupt animateScrollToPage on lift. Waiting here
                                     // avoids saving the drop against a half-settled currentPage.
                                     scope.launch {
                                         snapshotFlow { pageTurnInProgress }.first { !it }
-                                        finishHeldDrop(current)
+                                        finishHeldDrop(current, armed)
                                     }
                                 } else {
                                     turning?.cancel()
                                     turning = null
-                                    finishHeldDrop(current)
+                                    finishHeldDrop(current, armed)
                                 }
                             },
                             onDragCancel = {
@@ -643,7 +786,7 @@ fun GridHome(
                     state = pager,
                     // Auto-page turns handle an icon carry. Letting the pager's own horizontal
                     // drag recognizer run at the same time caused occasional partial-page stalls.
-                    userScrollEnabled = held == null && externalDrag == null && !pageTurnInProgress,
+                    userScrollEnabled = held == null && activeDrag == null && !pageTurnInProgress,
                     modifier = Modifier
                         .fillMaxSize()
                         // The page draws back a little while an app is being carried, the way a
@@ -651,7 +794,7 @@ fun GridHome(
                         // no longer the thing being touched, and gives the app room to be seen over
                         // it. Nothing else moves: the finger is still over the same cell.
                         .graphicsLayer {
-                            val drawn = if (held != null || externalDrag != null) DRAG_PAGE_SHRINK else 1f
+                            val drawn = if (held != null || activeDrag != null) DRAG_PAGE_SHRINK else 1f
                             scaleX = drawn
                             scaleY = drawn
                         }
@@ -663,6 +806,9 @@ fun GridHome(
                                 for (column in 0 until GRID_COLUMNS) {
                                     val id = slice.getOrNull(row * GRID_COLUMNS + column)
                                     val app = id?.let { byId[it] }
+                                    val folder = id?.let { folderById[it] }
+                                    // An app or a folder: whatever is in the cell, and moves like one.
+                                    val itemId = app?.id ?: folder?.id
                                     Box(
                                         modifier = Modifier
                                             .width(cellWidth)
@@ -672,15 +818,15 @@ fun GridHome(
                                         // A cell with nothing in it is a cell with nothing in it. An
                                         // app being carried leaves its cell empty, so the place it
                                         // came from is visibly free while it is in the air.
-                                        if (app != null && held?.id != app.id) {
-                                            // Keyed on the app so that when a drop rearranges the cells,
-                                            // each app starts at rest in its new cell instead of carrying
+                                        if (itemId != null && held?.id != itemId) {
+                                            // Keyed on the item so that when a drop rearranges the cells,
+                                            // each one starts at rest in its new cell instead of carrying
                                             // the old cell's slide with it.
-                                            key(app.id) {
+                                            key(itemId) {
                                                 // Where this app is being pushed to, in cells from where it
                                                 // sits. Only ever within this page; an app is never slid
                                                 // off the edge of the page the user is looking at.
-                                                val slot = moves[app.id]
+                                                val slot = moves[itemId]
                                                     ?.minus(firstCellOn(page))
                                                     ?.takeIf { it in 0 until perPage }
                                                 ShiftAway(
@@ -692,11 +838,22 @@ fun GridHome(
                                                     } else 0f,
                                                     reducedMotion = reducedMotion
                                                 ) {
-                                                    AppCell(
-                                                        app = app,
-                                                        iconLoader = iconLoader,
-                                                        onLaunch = { onLaunch(app) }
-                                                    )
+                                                    if (app != null) {
+                                                        AppCell(
+                                                            app = app,
+                                                            iconLoader = iconLoader,
+                                                            onLaunch = { onLaunch(app) }
+                                                        )
+                                                    } else if (folder != null) {
+                                                        FolderCell(
+                                                            folder = folder,
+                                                            apps = folder.apps.mapNotNull { byId[it] },
+                                                            iconLoader = iconLoader,
+                                                            armed = folderTarget ==
+                                                                firstCellOn(page) + row * GRID_COLUMNS + column,
+                                                            onOpen = { openFolderId = folder.id }
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -714,6 +871,9 @@ fun GridHome(
                     val page = pager.currentPage
                     val local = landing - firstCellOn(page)
                     if (local in 0 until perPage) {
+                        // Once a folder is on offer the cell is lit more strongly and rounder, so the
+                        // difference between "goes beside" and "goes in" can be seen.
+                        val folderOffered = folderTarget == landing
                         Box(
                             modifier = Modifier
                                 .offset(
@@ -722,8 +882,10 @@ fun GridHome(
                                 )
                                 .size(cellWidth, rowHeight)
                                 .padding(6.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(OrbitColors.Accent.copy(alpha = 0.22f))
+                                .clip(RoundedCornerShape(if (folderOffered) 30.dp else 18.dp))
+                                .background(
+                                    OrbitColors.Accent.copy(alpha = if (folderOffered) 0.38f else 0.22f)
+                                )
                         )
                     }
                 }
@@ -812,7 +974,8 @@ fun GridHome(
                 // The app itself, under the finger.
                 val carried = held
                 val carriedApp = carried?.let { byId[it.id] }
-                if (carried != null && carriedApp != null) {
+                val carriedFolder = carried?.let { folderById[it.id] }
+                if (carried != null && (carriedApp != null || carriedFolder != null)) {
                     Box(
                         modifier = Modifier
                             .offset {
@@ -830,8 +993,81 @@ fun GridHome(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        AppCell(app = carriedApp, iconLoader = iconLoader, onLaunch = {})
+                        if (carriedApp != null) {
+                            AppCell(app = carriedApp, iconLoader = iconLoader, onLaunch = {})
+                        } else if (carriedFolder != null) {
+                            FolderCell(
+                                folder = carriedFolder,
+                                apps = carriedFolder.apps.mapNotNull { byId[it] },
+                                iconLoader = iconLoader,
+                                armed = false,
+                                onOpen = {}
+                            )
+                        }
                     }
+                }
+
+                // An app being carried out of an open folder, under the finger. The drawer's carried app
+                // is drawn by the home screen; this one is ours.
+                val outOfFolder = folderDrag
+                val outOfFolderApp = outOfFolder?.let { byId[it.id] }
+                if (outOfFolder != null && outOfFolderApp != null && !outOfFolder.released) {
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (outOfFolder.x - origin.x - cellWidthPx / 2f).roundToInt(),
+                                    (outOfFolder.y - origin.y - cellHeightPx / 2f).roundToInt()
+                                )
+                            }
+                            .width(cellWidth)
+                            .height(rowHeight)
+                            .graphicsLayer {
+                                scaleX = 1.08f
+                                scaleY = 1.08f
+                                alpha = 0.92f
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AppCell(app = outOfFolderApp, iconLoader = iconLoader, onLaunch = {})
+                    }
+                }
+
+                // The open folder. Above everything else in the grid, including the app menu.
+                val openFolder = openFolderId?.let { folderById[it] }
+                if (openFolder != null) {
+                    FolderPopup(
+                        folder = openFolder,
+                        apps = openFolder.apps.mapNotNull { byId[it] },
+                        iconLoader = iconLoader,
+                        // Out of sight while one of its apps is being carried away, but still there:
+                        // the touch belongs to an icon inside it.
+                        hidden = folderDrag != null,
+                        onLaunch = { app ->
+                            openFolderId = null
+                            onLaunch(app)
+                        },
+                        onRename = { name ->
+                            commit(
+                                homeIds,
+                                cells,
+                                liveFolders.map { if (it.id == openFolder.id) it.copy(name = name) else it }
+                            )
+                        },
+                        onDismiss = { openFolderId = null },
+                        dragFor = { app ->
+                            AppDragCallbacks(
+                                onStart = { at -> folderDrag = ExternalAppDrag(app.id, at.x, at.y) },
+                                onMove = { at -> folderDrag = folderDrag?.copy(x = at.x, y = at.y) },
+                                onEnd = { at ->
+                                    folderDrag = folderDrag?.copy(x = at.x, y = at.y, released = true)
+                                },
+                                onCancel = { folderDrag = null },
+                                // Held and let go in place: nothing to do, the folder stays open.
+                                onHold = {}
+                            )
+                        }
+                    )
                 }
             }
 
@@ -937,6 +1173,26 @@ private const val DRAG_PAGE_SHRINK = 0.97f
  * does not make every app it passes jump aside.
  */
 private const val PREVIEW_DWELL_MS = 140L
+
+/**
+ * A new folder has no name of its own: it is shown as "Folder" in whatever language the phone is in,
+ * and keeps doing so until the user types one.
+ */
+private const val NEW_FOLDER_NAME = ""
+
+/**
+ * How long a carried app has to rest over the middle of another before dropping it makes a folder.
+ *
+ * Longer than [PREVIEW_DWELL_MS] on purpose: moving apart to make room is cheap and takes back
+ * easily, but a folder is a bigger thing to offer, and it should only appear when it was meant.
+ */
+private const val FOLDER_DWELL_MS = 350L
+
+/**
+ * How much of a cell, either side of its middle, counts as "over the app" for making a folder. The
+ * rest of the cell is for reordering. A quarter-cell either way is about the icon itself.
+ */
+private const val FOLDER_ZONE = 0.28f
 
 /** How far the finger has to move before a hold becomes a drag, and the menu goes away. */
 private val MENU_MOVE = 8.dp

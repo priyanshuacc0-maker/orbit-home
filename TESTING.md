@@ -257,3 +257,29 @@ switch at Settings > Haptic feedback, and by the system's Touch feedback setting
 11. Disable the system Touch feedback setting with Orbit's switch ON: Orbit must stay silent.
 12. Test with the phone's vibration intensity at low and normal. A missing or failing motor/service must never
     block or cancel a gesture.
+
+## Grid folders
+
+- [ ] Hold an app and drag it over the **middle** of another app and wait. After a moment the
+      cell lights up more strongly and a light tick is felt. Let go: a folder appears in that cell
+      holding both apps, and the dragged app's old cell is empty.
+- [ ] Do the same but drop on the **edge** of the other app's cell. No folder: the apps reorder
+      as before.
+- [ ] Sweep an app across several others without stopping. No folder is offered along the way.
+- [ ] Tap the folder. It opens as a panel with its apps. Tap an app: it opens, and the panel closes.
+- [ ] Tap the name at the top of an open folder, type a new one, press Done, close the folder.
+      The new name is under the folder's tile. Clear the name: the tile says "Folder" again.
+- [ ] Drag an app onto an existing folder (middle of the cell, wait): it joins the folder.
+- [ ] Open a folder, hold one of its apps and drag it out onto an empty cell. The panel hides while
+      you carry it; on drop the app is on the grid and gone from the folder.
+- [ ] Take apps out of a two-app folder until one is left: the folder turns back into that app, in
+      the same cell.
+- [ ] Open a folder, drag an app out and drop it back on the same folder. Nothing changes.
+- [ ] Drag a folder to another cell, and to another page: it moves like an app does. Dropping a
+      folder on an app does not make a folder inside a folder.
+- [ ] Drag a folder to Remove: the folder goes, and all its apps are back in the drawer only.
+- [ ] Drag an app from the **drawer** onto the middle of a home app: a folder is made with both.
+- [ ] Kill and reopen the app: folders, their names and their apps are as you left them.
+- [ ] Uninstall an app that is in a folder: it disappears from the folder. Uninstall every app in a folder:
+      the folder's cell goes empty and nothing else moves.
+- [ ] With the system animation scale at 0, everything above still works, without the slide.

@@ -18,6 +18,7 @@ import com.orbit.home.ui.settings.SettingsRoute
 import com.orbit.home.diagnostics.Diagnostics
 import com.orbit.home.overlay.ShortcutWheelService
 import com.orbit.home.preferences.AppPreferences
+import com.orbit.home.preferences.GridFolder
 import com.orbit.home.preferences.HomeSettings
 import com.orbit.home.preferences.WheelLook
 import kotlinx.coroutines.Dispatchers
@@ -127,6 +128,8 @@ data class HomeUiState(
     /** The apps the home screen holds, and whether it has been arranged yet. */
     val homeApps: List<String> = emptyList(),
     val homeInitialized: Boolean = false,
+    /** The folders on the grid home. */
+    val gridFolders: List<GridFolder> = emptyList(),
     /** The system's reduced-motion preference. */
     val reducedMotion: Boolean = false,
     /** A one-shot message to show, if anything went wrong. */
@@ -321,6 +324,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         homeGrid = s.homeGrid,
                         gridOrder = s.gridOrder,
                         homeApps = s.homeApps,
+                        gridFolders = s.gridFolders,
                         homeInitialized = s.homeInitialized
                     ).withDerived()
                 }
@@ -762,10 +766,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setGridLayout(homeIds: List<String>, cells: List<String>) {
+    fun setGridLayout(homeIds: List<String>, cells: List<String>, folders: List<GridFolder>) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                preferences.setGridLayout(homeIds, cells)
+                preferences.setGridLayout(homeIds, cells, folders)
             } catch (t: Throwable) {
                 Diagnostics.rethrowIfCancellation(t)
                 postMessage(getApplication<Application>().getString(R.string.home_save_failed))

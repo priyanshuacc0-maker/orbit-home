@@ -128,6 +128,11 @@ data class HomeSettings(
      */
     val homeApps: List<String> = emptyList(),
     val homeInitialized: Boolean = false,
+    /**
+     * The folders on the grid home. A folder's apps are in [homeApps] like any other, but have no cell
+     * of their own: the folder's id is what sits in the cell. See [GridFolder].
+     */
+    val gridFolders: List<GridFolder> = emptyList(),
     /** Sparse, index-aligned centre choices for the home wheels. Null means never chosen. */
     val centreHome: List<CentreChoice?> = emptyList(),
     /** The floating wheel remains a single, independent centre. */
@@ -287,6 +292,7 @@ class AppPreferences(private val context: Context) {
         val HOME_GRID = booleanPreferencesKey("home_grid")
         val GRID_ORDER = stringPreferencesKey("grid_order")
         val HOME_APPS = stringPreferencesKey("home_apps")
+        val HOME_FOLDERS = stringPreferencesKey("home_folders")
         val HOME_INITIALIZED = booleanPreferencesKey("home_initialized")
         val CENTRE_FLOATING = stringPreferencesKey("centre_floating")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
@@ -340,6 +346,7 @@ class AppPreferences(private val context: Context) {
             homeGrid = p[Keys.HOME_GRID] ?: false,
             homeApps = p[Keys.HOME_APPS]?.split("\n")?.filter { it.isNotBlank() } ?: emptyList(),
             homeInitialized = p[Keys.HOME_INITIALIZED] ?: false,
+            gridFolders = GridFolderCodec.decode(p[Keys.HOME_FOLDERS]),
             gridOrder = p[Keys.GRID_ORDER]?.split("\n")?.let { written ->
                 // An empty entry is a cell with nothing in it, so it is kept. The trailing ones are
                 // only the string's own shape, not a gap at the end of the grid.
@@ -578,12 +585,18 @@ class AppPreferences(private val context: Context) {
      * Both are normalised here rather than at the call sites, so every caller gets the same guarantees
      * without having to know them.
      */
-    suspend fun setGridLayout(homeIds: List<String>, cells: List<String>) {
+    suspend fun setGridLayout(
+        homeIds: List<String>,
+        cells: List<String>,
+        /** The folders, written in the same edit as the cells that hold their ids. Null leaves them as stored. */
+        folders: List<GridFolder>? = null
+    ) {
         val membership = normaliseHomeIds(homeIds)
         val arrangement = normaliseCells(cells)
         context.dataStore.edit {
             it[Keys.HOME_APPS] = membership.joinToString("\n")
             it[Keys.GRID_ORDER] = arrangement.joinToString("\n")
+            if (folders != null) it[Keys.HOME_FOLDERS] = GridFolderCodec.encode(folders)
             it[Keys.HOME_INITIALIZED] = true
         }
     }

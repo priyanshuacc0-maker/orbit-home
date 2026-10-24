@@ -72,6 +72,9 @@
     <string name="app_remove">Remove</string>
     <string name="app_info">App info</string>
     <string name="app_uninstall">Uninstall</string>
+    <string name="folder_default_name">Folder</string>
+    <string name="folder_open_label">Open folder %1$s</string>
+    <string name="folder_name_label">Folder name</string>
     <string name="home_layout_grid">Show apps as a grid</string>
     <string name="home_layout_wheel">Show the wheel</string>
     <string name="wallpaper_hidden">Hidden wallpaper</string>

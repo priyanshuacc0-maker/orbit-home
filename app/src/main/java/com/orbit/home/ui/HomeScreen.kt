@@ -768,8 +768,9 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     // (false). Reporting "initialised" until then stops the grid seeding a starting
                     // layout over an arrangement that simply has not been read yet.
                     homeInitialized = state.homeInitialized || !state.settingsLoaded,
-                    onSaveLayout = { ids, cells -> viewModel.setGridLayout(ids, cells) },
+                    onSaveLayout = { ids, cells, folders -> viewModel.setGridLayout(ids, cells, folders) },
                     order = state.gridOrder,
+                    folders = state.gridFolders,
                     iconLoader = viewModel.iconLoader,
                     onLaunch = viewModel::launch,
                     externalDrag = appDrag,
