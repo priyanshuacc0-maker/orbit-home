@@ -98,7 +98,7 @@ private val SlotSpring = spring<Float>(dampingRatio = Spring.DampingRatioNoBounc
  * jump.
  */
 @Composable
-fun DockRow(
+internal fun DockRow(
     apps: List<InstalledApp>,
     iconLoader: AppIconLoader,
     onLaunch: (InstalledApp) -> Unit,
