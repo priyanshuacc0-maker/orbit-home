@@ -5,6 +5,8 @@ import android.app.WallpaperManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -60,6 +62,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /** What the page is telling the user, if anything. */
 private sealed interface WallpaperStatus {
@@ -111,12 +114,9 @@ private val BUTTON_HEIGHT = 56.dp
  */
 @Composable
 fun SettingsWallpaperPage(
-    /** Whether the hidden wallpaper is the one showing. */
-    hiddenShowing: Boolean,
     /** The hidden wallpaper, if one has been set. */
     hiddenWallpaper: ImageBitmap?,
     onSetHidden: (Uri, (Boolean) -> Unit) -> Unit,
-    onToggleHidden: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -146,18 +146,6 @@ fun SettingsWallpaperPage(
     // user did not choose.
     val pickPhoto = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri == null) {
-            status = WallpaperStatus.Cancelled
-        } else {
-            status = WallpaperStatus.Idle
-            pending = uri
-        }
-    }
-
-    // Everything else: Downloads, a cloud provider, a file manager.
-    val pickDocument = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) {
             status = WallpaperStatus.Cancelled
@@ -198,6 +186,13 @@ fun SettingsWallpaperPage(
         DEFAULT_SCREEN_RATIO
     }
     val previewSize = remember(frame) { previewFrameSize(frame.first, frame.second) }
+
+    // The phone's own wallpaper, for the card's preview. Read on a background thread and drawn
+    // straight into a thumbnail-sized bitmap, so a full-size wallpaper is never held in memory just
+    // to fill a small box. Null when it cannot be read, and the card then shows its mark instead.
+    val phoneWallpaper by produceState<ImageBitmap?>(null, context, screenRatio) {
+        value = withContext(Dispatchers.IO) { readSystemWallpaper(context) }
+    }
 
     // Whichever picture is waiting, and the preview of it.
     //
@@ -336,38 +331,23 @@ fun SettingsWallpaperPage(
             } else {
                 Spacer(Modifier.height(8.dp))
 
-                // The phone's wallpaper, and only that. The hidden one has its own box below and
-                // nothing of its own up here.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    WallpaperSourceCard(
-                        painter = R.drawable.ic_set_wallpaper,
-                        title = stringResource(R.string.wallpaper_choose_photo),
-                        enabled = !busy,
-                        onClick = {
-                            status = WallpaperStatus.Idle
-                            pickPhoto.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    WallpaperSourceCard(
-                        painter = R.drawable.ic_action_folder,
-                        title = stringResource(R.string.wallpaper_browse_files),
-                        enabled = !busy,
-                        onClick = {
-                            status = WallpaperStatus.Idle
-                            // image/* only. Asking for all files would be a broader permission
-                            // than choosing a picture needs, and would show the user things
-                            // they did not come here to pick.
-                            pickDocument.launch(arrayOf("image/*"))
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                // The phone's wallpaper, as the same card the hidden one uses below, so the two
+                // read as two of a kind. Tapping it picks a picture; the picture beside the name
+                // is the wallpaper the phone is showing now.
+                WallpaperChoiceCard(
+                    current = phoneWallpaper,
+                    screenRatio = screenRatio,
+                    title = stringResource(R.string.wallpaper_home),
+                    subtitle = null,
+                    enabled = !busy,
+                    onClick = {
+                        status = WallpaperStatus.Idle
+                        pickPhoto.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 Spacer(Modifier.height(12.dp))
 
@@ -375,9 +355,14 @@ fun SettingsWallpaperPage(
                 // preview and the same two buttons as the phone's — the difference is only where
                 // the picture ends up. What is set now is shown beside the name, at the phone's
                 // own shape, so the box is a preview of the thing it controls.
-                HiddenWallpaperCard(
+                WallpaperChoiceCard(
                     current = hiddenWallpaper,
                     screenRatio = screenRatio,
+                    title = stringResource(R.string.wallpaper_hidden),
+                    subtitle = stringResource(
+                        if (hiddenWallpaper == null) R.string.wallpaper_hidden_none
+                        else R.string.wallpaper_hidden_sub
+                    ),
                     enabled = !busy,
                     onClick = {
                         status = WallpaperStatus.Idle
@@ -388,33 +373,6 @@ fun SettingsWallpaperPage(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Which one is showing, and the way to change it that is not a gesture. A triple tap
-                // is something only some people can do, so it is never the only way to a feature.
-                if (hiddenWallpaper != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = stringResource(
-                                if (hiddenShowing) R.string.wallpaper_showing_hidden
-                                else R.string.wallpaper_showing_phone
-                            ),
-                            color = OrbitColors.TextSecondary,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        WallpaperButton(
-                            text = stringResource(R.string.wallpaper_switch),
-                            filled = false,
-                            enabled = !busy,
-                            onClick = onToggleHidden,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
             }
 
             WallpaperStatusLine(status)
@@ -477,9 +435,11 @@ private fun WallpaperPreview(state: PreviewState, modifier: Modifier = Modifier)
  * looks like a picture that failed to load.
  */
 @Composable
-private fun HiddenWallpaperCard(
+private fun WallpaperChoiceCard(
     current: ImageBitmap?,
     screenRatio: Float,
+    title: String,
+    subtitle: String?,
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -514,67 +474,51 @@ private fun HiddenWallpaperCard(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = stringResource(R.string.wallpaper_hidden),
+                text = title,
                 color = OrbitColors.TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            Text(
-                text = stringResource(
-                    if (current == null) R.string.wallpaper_hidden_none
-                    else R.string.wallpaper_hidden_sub
-                ),
-                color = OrbitColors.TextSecondary,
-                style = MaterialTheme.typography.bodySmall
-            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    color = OrbitColors.TextSecondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }
 
-/** One way in: a card with its own mark and its name. */
-@Composable
-private fun WallpaperSourceCard(
-    painter: Int,
-    title: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    subtitle: String? = null,
-    selected: Boolean = false
-) {
-    val shape = RoundedCornerShape(22.dp)
-    Column(
-        modifier = modifier
-            .clip(shape)
-            .background(OrbitColors.Surface)
-            .then(
-                if (selected) Modifier.border(2.dp, OrbitColors.Accent, shape) else Modifier
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(14.dp)
-    ) {
-        // The drawing carries its own disc, so nothing is drawn behind it.
-        Image(
-            painter = painterResource(painter),
-            contentDescription = null,
-            modifier = Modifier.size(44.dp)
-        )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            text = title,
-            color = OrbitColors.TextPrimary,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        if (subtitle != null) {
-            Text(
-                text = subtitle,
-                color = OrbitColors.TextSecondary,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
+/**
+ * The phone's current home screen wallpaper, small enough to sit in a card.
+ *
+ * Drawn into a thumbnail-sized bitmap rather than decoded at full size and then shrunk, so the full
+ * wallpaper is never allocated. A failure is not worth reporting (a device that will not hand its
+ * wallpaper to an app, a drawable with no size): the card falls back to its own mark instead.
+ */
+private fun readSystemWallpaper(context: Context): ImageBitmap? = try {
+    val drawable = WallpaperManager.getInstance(context).drawable
+    val width = drawable?.intrinsicWidth ?: 0
+    val height = drawable?.intrinsicHeight ?: 0
+    if (drawable == null || width <= 0 || height <= 0) {
+        null
+    } else {
+        val targetHeight = WALLPAPER_THUMBNAIL_PX
+        val targetWidth = (width.toFloat() * targetHeight / height).roundToInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, targetWidth, targetHeight)
+        drawable.draw(canvas)
+        bitmap.asImageBitmap()
     }
+} catch (t: Throwable) {
+    com.orbit.home.diagnostics.Diagnostics.warn("wallpaper read failed", t)
+    null
 }
+
+/** Tall enough to stay sharp in the card, small enough not to matter. */
+private const val WALLPAPER_THUMBNAIL_PX = 256
 
 
 /**

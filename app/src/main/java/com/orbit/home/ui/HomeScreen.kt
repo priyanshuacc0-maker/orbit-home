@@ -1364,10 +1364,8 @@ fun HomeScreen(viewModel: HomeViewModel) {
                     )
 
                     SettingsRoute.WALLPAPER -> SettingsWallpaperPage(
-                        hiddenShowing = state.hiddenWallpaperShowing,
                         hiddenWallpaper = hiddenWallpaper,
                         onSetHidden = { uri, onResult -> viewModel.setHiddenWallpaper(uri, onResult) },
-                        onToggleHidden = { viewModel.toggleHiddenWallpaper() },
                         onBack = backToList
                     )
 

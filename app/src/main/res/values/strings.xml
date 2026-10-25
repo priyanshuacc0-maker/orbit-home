@@ -22,6 +22,7 @@
     <string name="shortcut_failed_toast">Couldn\u2019t open that shortcut</string>
     <string name="picker_failed_toast">Couldn\u2019t open the picker</string>
     <string name="wallpaper_apply">Apply</string>
+    <string name="wallpaper_home">Home screen wallpaper</string>
     <string name="wallpaper_choose_photo">Choose from photos</string>
     <string name="wallpaper_browse_files">Browse files</string>
     <string name="wallpaper_working">Setting\u2026</string>
