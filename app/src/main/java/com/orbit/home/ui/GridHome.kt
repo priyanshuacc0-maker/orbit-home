@@ -26,6 +26,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
@@ -56,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import com.orbit.home.R
 import com.orbit.home.apps.AppActions
 import com.orbit.home.apps.AppIconLoader
@@ -222,7 +225,18 @@ fun GridHome(
         //
         // Rows are worked out from the height rather than fixed, because a taller screen should hold
         // more of them.
-        val rows = ((maxHeight - PAGE_DOTS_HEIGHT) / CELL_HEIGHT).toInt().coerceAtLeast(1)
+        // The strip the page dots sit in is only taken when there will be dots in it. With a single
+        // page it used to be reserved all the same, which left a band of nothing along the bottom of
+        // the grid and rows shorter than the height allowed.
+        //
+        // The count behind that is an upper bound - it counts apps a folder holds, which have no cell
+        // of their own - because that is the safe direction. Taking the strip and not needing it costs
+        // the band; not taking it and then needing it would draw the dots over the last row.
+        val cellCount = if (homeInitialized) homeApps.size else allApps.size
+        val rowsWithoutStrip = (maxHeight / CELL_HEIGHT).toInt().coerceAtLeast(1)
+        val rowsWithStrip = ((maxHeight - PAGE_DOTS_HEIGHT) / CELL_HEIGHT).toInt().coerceAtLeast(1)
+        val dotsExpected = cellCount > GRID_COLUMNS * rowsWithoutStrip
+        val rows = if (dotsExpected) rowsWithStrip else rowsWithoutStrip
         // Which apps this screen holds, and where. Declared here because the page count below is
         // worked out from them, and the seeding below needs the row count this line just produced.
         val homeIds = if (homeInitialized) homeApps else (seeded ?: emptyList())
@@ -1139,12 +1153,17 @@ fun GridHome(
             }
 
             // Where you are, and how much there is left. Only shown when there is more than one page,
-            // because a single dot is not information.
-            if (pageCount > 1) {
+            // because a single dot is not information - and only when the strip for it was taken, so
+            // that the dots can never be drawn over the last row.
+            if (dotsExpected && pageCount > 1) {
+                // The dots say where you are in colour alone, which a screen reader cannot see. This
+                // is the same thing in words.
+                val pageLabel = stringResource(R.string.grid_page_of, pager.currentPage + 1, pageCount)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(PAGE_DOTS_HEIGHT),
+                        .height(PAGE_DOTS_HEIGHT)
+                        .semantics { contentDescription = pageLabel },
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1165,6 +1184,18 @@ fun GridHome(
                     }
                 }
             }
+        }
+
+        // Nothing on the home screen at all: say so, and say how to put something on it. A grid of
+        // empty cells with no word about it reads as a grid that failed rather than one waiting to
+        // be filled.
+        if (cells.isEmpty()) {
+            AppEmptyState(
+                icon = Icons.Filled.Add,
+                title = stringResource(R.string.grid_empty_title),
+                body = stringResource(R.string.grid_empty_body),
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

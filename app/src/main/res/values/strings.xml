@@ -100,6 +100,9 @@
     <string name="drawer_show_list">Show as a list</string>
     <string name="drawer_empty_title">No apps match</string>
     <string name="drawer_empty_body">Try a different search.</string>
+    <string name="grid_page_of">Page %1$d of %2$d</string>
+    <string name="grid_empty_title">Your home screen is empty</string>
+    <string name="grid_empty_body">Pull up from the dock to see all your apps, then drag one here.</string>
 
     <!-- The wheel, when the device has no launchable apps at all -->
     <string name="no_selection_title">No apps found</string>
