@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -766,19 +767,43 @@ internal fun AppCell(
             }
         }
         Spacer(Modifier.height(6.dp))
-        Text(
-            text = app.label,
-            color = OrbitColors.TextPrimary,
-            // Two lines, reserved whether the name needs them or not. The cell is a fixed height, so a
-            // name that wraps used to push its icon up while its neighbours stayed put - which is what
-            // made the rows look ragged. Reserving both lines costs a little space and buys a grid
-            // whose icons are on a line.
-            minLines = 2,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            style = (labelStyle ?: MaterialTheme.typography.labelSmall).copy(shadow = LABEL_SHADOW)
-        )
+        // Two lines, reserved whether the name needs them or not. The cell is a fixed height, so a
+        // name that wraps used to push its icon up while its neighbours stayed put - which is what
+        // made the rows look ragged. Reserving both lines costs a little space and buys a grid
+        // whose icons are on a line.
+        //
+        // The name is centred inside those two lines rather than sitting on the first of them. With
+        // the text at the top, a one-line name left the whole second line blank underneath it, so
+        // the icon and its name rode high in the cell with a gap below them; centred, there is as
+        // much room above the name as under it and the pair sits in the middle of the cell. The
+        // icons still share a line either way, because the box is two lines tall whatever the name.
+        val resolvedLabel = labelStyle ?: MaterialTheme.typography.labelSmall
+        val labelDensity = LocalDensity.current
+        val twoLines = remember(resolvedLabel, labelDensity) {
+            with(labelDensity) {
+                val line = if (resolvedLabel.lineHeight.isSp) {
+                    resolvedLabel.lineHeight
+                } else {
+                    // Every style this is used with states a line height; this is only a guard so a
+                    // style that did not could not crash the grid.
+                    resolvedLabel.fontSize * 1.4f
+                }
+                line.toDp() * 2
+            }
+        }
+        Box(
+            modifier = Modifier.heightIn(min = twoLines),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = app.label,
+                color = OrbitColors.TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                style = resolvedLabel.copy(shadow = LABEL_SHADOW)
+            )
+        }
     }
 }
 
