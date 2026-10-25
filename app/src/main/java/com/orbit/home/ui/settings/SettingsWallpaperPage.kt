@@ -1,12 +1,7 @@
 package com.orbit.home.ui.settings
 
-import android.app.Activity
 import android.app.WallpaperManager
-import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -55,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.orbit.home.apps.WallpaperStore
 import com.orbit.home.R
 import com.orbit.home.ui.theme.OrbitColors
 import android.widget.Toast
@@ -62,7 +58,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
 
 /** What the page is telling the user, if anything. */
 private sealed interface WallpaperStatus {
@@ -187,11 +182,16 @@ fun SettingsWallpaperPage(
     }
     val previewSize = remember(frame) { previewFrameSize(frame.first, frame.second) }
 
-    // The phone's own wallpaper, for the card's preview. Read on a background thread and drawn
-    // straight into a thumbnail-sized bitmap, so a full-size wallpaper is never held in memory just
-    // to fill a small box. Null when it cannot be read, and the card then shows its mark instead.
-    val phoneWallpaper by produceState<ImageBitmap?>(null, context, screenRatio) {
-        value = withContext(Dispatchers.IO) { readSystemWallpaper(context) }
+    /** Bumped when this app sets the home wallpaper, so the card re-reads the copy it kept. */
+    var phoneWallpaperRefresh by remember { mutableStateOf(0) }
+
+    // The phone's wallpaper as this app last set it, for the card's preview. It is this app's own
+    // copy rather than a read of the phone's, because the phone's cannot be read back - see
+    // WallpaperStore. Null until a wallpaper has been set here, and the card then shows its mark.
+    val phoneWallpaper by produceState<ImageBitmap?>(null, context, phoneWallpaperRefresh) {
+        value = withContext(Dispatchers.IO) {
+            WallpaperStore(context.applicationContext, WallpaperStore.HOME).load()
+        }
     }
 
     // Whichever picture is waiting, and the preview of it.
@@ -306,7 +306,11 @@ fun SettingsWallpaperPage(
                                         }
                                     }
                                     status = result
-                                    if (status == WallpaperStatus.Applied) pending = null
+                                    if (status == WallpaperStatus.Applied) {
+                                        pending = null
+                                        // The copy has been written: re-read it for the card.
+                                        phoneWallpaperRefresh++
+                                    }
                                 }
                             } else if (hiddenChosen != null) {
                                 // The hidden one is this app's own background, so it is kept here —
@@ -490,36 +494,6 @@ private fun WallpaperChoiceCard(
     }
 }
 
-/**
- * The phone's current home screen wallpaper, small enough to sit in a card.
- *
- * Drawn into a thumbnail-sized bitmap rather than decoded at full size and then shrunk, so the full
- * wallpaper is never allocated. A failure is not worth reporting (a device that will not hand its
- * wallpaper to an app, a drawable with no size): the card falls back to its own mark instead.
- */
-private fun readSystemWallpaper(context: Context): ImageBitmap? = try {
-    val drawable = WallpaperManager.getInstance(context).drawable
-    val width = drawable?.intrinsicWidth ?: 0
-    val height = drawable?.intrinsicHeight ?: 0
-    if (drawable == null || width <= 0 || height <= 0) {
-        null
-    } else {
-        val targetHeight = WALLPAPER_THUMBNAIL_PX
-        val targetWidth = (width.toFloat() * targetHeight / height).roundToInt().coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, targetWidth, targetHeight)
-        drawable.draw(canvas)
-        bitmap.asImageBitmap()
-    }
-} catch (t: Throwable) {
-    com.orbit.home.diagnostics.Diagnostics.warn("wallpaper read failed", t)
-    null
-}
-
-/** Tall enough to stay sharp in the card, small enough not to matter. */
-private const val WALLPAPER_THUMBNAIL_PX = 256
-
 
 /**
  * Cancel and Apply.
@@ -589,6 +563,9 @@ private suspend fun setDirectly(context: Context, uri: Uri): WallpaperStatus = w
             true,
             WallpaperManager.FLAG_SYSTEM
         )
+        // Kept, because the phone's wallpaper cannot be read back: see WallpaperStore. This copy is
+        // what the settings card shows beside "Home screen wallpaper".
+        WallpaperStore(context.applicationContext, WallpaperStore.HOME).save(framed.asImageBitmap())
         // Not recycled: setBitmap copies on stock Android, but an OEM that keeps the reference would
         // show a black or torn wallpaper. The garbage collector frees it safely.
         WallpaperStatus.Applied

@@ -5,10 +5,6 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.ui.platform.LocalContext
 import com.orbit.home.apps.AppActions
 import androidx.compose.animation.core.Spring

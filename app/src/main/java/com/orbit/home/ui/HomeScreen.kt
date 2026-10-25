@@ -100,7 +100,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.orbit.home.R
-import com.orbit.home.animation.Motion
 import com.orbit.home.animation.WheelMotionState
 import com.orbit.home.preferences.HomeSettings
 import com.orbit.home.apps.DockLayout
@@ -121,9 +120,7 @@ import kotlin.math.abs
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import android.view.TextureView
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset

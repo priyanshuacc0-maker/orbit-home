@@ -13,16 +13,22 @@ import com.orbit.home.ui.settings.screenFrameSize
 import java.io.File
 
 /**
- * The hidden wallpaper: a picture the launcher draws itself.
+ * A wallpaper this app keeps for itself, in its own storage.
  *
- * Drawn by the launcher rather than set as the phone's wallpaper, which is what makes switching to
- * it instant, private to Orbit Home, and impossible to refuse. A wallpaper change is global and
- * slow and repaints every other app's background; a triple tap on the home screen should not do
- * that, and should not need anybody's permission to.
+ * Two pictures live here. The hidden wallpaper is one the launcher draws itself, which is what makes
+ * switching to it instant, private to Orbit Home, and impossible to refuse: a wallpaper change is
+ * global and slow and repaints every other app's background, and a triple tap should not do that.
+ *
+ * The other is a copy of the home screen wallpaper, kept because the phone's own cannot be read
+ * back. Up to Android 12 reading it needed READ_EXTERNAL_STORAGE, from Android 13 the default
+ * wallpaper is returned instead, and from Android 14 `WallpaperManager.getDrawable` always throws a
+ * SecurityException unless the app holds MANAGE_EXTERNAL_STORAGE — which is a permission for file
+ * managers and backup tools, and not one a launcher should ask for to draw a thumbnail. So the copy
+ * written here, at the moment this app sets the wallpaper, is the only picture of it there is.
  */
-class HiddenWallpaperStore(private val context: Context) {
+class WallpaperStore(private val context: Context, private val fileName: String) {
 
-    private fun file(): File = File(File(context.filesDir, DIRECTORY), "hidden.png")
+    private fun file(): File = File(File(context.filesDir, DIRECTORY), fileName)
 
     /**
      * Copies [uri] in, the right way up and cut to the screen's own shape and size.
@@ -63,10 +69,13 @@ class HiddenWallpaperStore(private val context: Context) {
         Unit
     }
 
-    /** Whether one is set, without decoding it. */
-    fun isSet(): Boolean = file().let { it.isFile && it.length() > 0L }
+    companion object {
+        /** The picture the launcher draws when the home screen is triple-tapped. */
+        const val HIDDEN = "hidden.png"
 
-    private companion object {
-        const val DIRECTORY = "wallpapers"
+        /** The home screen wallpaper, as this app last set it. */
+        const val HOME = "home.png"
+
+        private const val DIRECTORY = "wallpapers"
     }
 }

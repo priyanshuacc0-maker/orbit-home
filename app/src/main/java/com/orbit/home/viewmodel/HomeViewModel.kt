@@ -39,14 +39,10 @@ import com.orbit.home.apps.CentrePicture
 import com.orbit.home.preferences.CentreChoice
 import com.orbit.home.preferences.CentreTarget
 import androidx.compose.ui.graphics.ImageBitmap
-import android.os.Build
-import com.orbit.home.apps.renderFramed
 import com.orbit.home.preferences.CentreTransform
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import androidx.compose.ui.graphics.asAndroidBitmap
-import com.orbit.home.apps.HiddenWallpaperStore
+import com.orbit.home.apps.WallpaperStore
 
 /** Everything the home screen needs to draw itself. */
 data class HomeUiState(
@@ -206,7 +202,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
     private val centreStore = CentreImageStore(application)
-    private val hiddenWallpaperStore = HiddenWallpaperStore(application)
+    private val hiddenWallpaperStore = WallpaperStore(application, WallpaperStore.HIDDEN)
 
     private val _centrePictures = MutableStateFlow(CentrePictures())
 

@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.pm.LauncherApps
 import android.content.Context
 import androidx.compose.runtime.mutableIntStateOf
-import com.orbit.home.R
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.CancellationException
